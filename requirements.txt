@@ -2,9 +2,12 @@
 
 # Core dependencies
 torch>=2.0.0
-numpy>=1.24.0
+numpy>=1.24.0,<2.0.0  # Pin to 1.x for PyTorch compatibility
 pyyaml>=6.0
 
 # Optional but recommended for better performance
 # Install with: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 # (Adjust CUDA version as needed)
+
+# For conda users with CUDA 12.x:
+# conda install pytorch pytorch-cuda=12.1 "numpy<2.0" pyyaml -c pytorch -c nvidia
