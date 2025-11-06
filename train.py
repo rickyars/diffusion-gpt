@@ -214,16 +214,23 @@ def train_model(
     print(f"\nModel parameters: {model.get_num_params() / 1e6:.2f}M")
 
     # Compile model for faster training (PyTorch 2.0+)
+    # Note: May not work on Windows without Triton
     if hasattr(torch, 'compile') and device.type == 'cuda':
-        print("Compiling model with torch.compile() for faster training...")
-        model = torch.compile(model)
+        try:
+            print("Attempting to compile model with torch.compile()...")
+            model = torch.compile(model)
+            print("✓ Model compiled successfully - expect faster training!")
+        except Exception as e:
+            print(f"⚠ torch.compile() failed (this is OK): {str(e)[:100]}")
+            print("  Continuing with eager mode (slightly slower but works fine)")
 
     # Initialize optimizer
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
 
     # Mixed precision training for faster computation
     use_amp = device.type == 'cuda'
-    scaler = torch.cuda.amp.GradScaler() if use_amp else None
+    # Use torch.amp.GradScaler instead of deprecated torch.cuda.amp.GradScaler
+    scaler = torch.amp.GradScaler('cuda') if use_amp else None
     if use_amp:
         print("Using mixed precision training (AMP) for faster computation")
 
@@ -276,7 +283,7 @@ def train_model(
 
                 # Mixed precision training
                 if use_amp:
-                    with torch.cuda.amp.autocast():
+                    with torch.amp.autocast('cuda'):
                         loss = loss_function(
                             model, batch, noise, vocab_size,
                             sampling_eps=config['noise']['sigma_min']
