@@ -176,6 +176,7 @@ def train_model(
         val_split=val_split,
         vocab_path=vocab_path if os.path.exists(vocab_path) else None,
         shuffle=True,
+        num_workers=2,  # Parallel data loading (adjust based on CPU cores)
     )
 
     print("Loading validation data...")
@@ -187,6 +188,7 @@ def train_model(
         val_split=val_split,
         vocab_path=vocab_path,
         shuffle=False,
+        num_workers=2,
     )
 
     # Save vocabulary for later use
@@ -210,8 +212,19 @@ def train_model(
 
     print(f"\nModel parameters: {model.get_num_params() / 1e6:.2f}M")
 
+    # Compile model for faster training (PyTorch 2.0+)
+    if hasattr(torch, 'compile') and device.type == 'cuda':
+        print("Compiling model with torch.compile() for faster training...")
+        model = torch.compile(model)
+
     # Initialize optimizer
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
+
+    # Mixed precision training for faster computation
+    use_amp = device.type == 'cuda'
+    scaler = torch.cuda.amp.GradScaler() if use_amp else None
+    if use_amp:
+        print("Using mixed precision training (AMP) for faster computation")
 
     # Initialize noise schedule
     noise = GeometricNoise(
@@ -238,15 +251,29 @@ def train_model(
         num_batches = 0
 
         for batch_idx, batch in enumerate(train_loader):
-            batch = batch.to(device)
-            loss = loss_function(
-                model, batch, noise, vocab_size,
-                sampling_eps=config['noise']['sigma_min']
-            )
+            batch = batch.to(device, non_blocking=True)
 
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+            # Mixed precision training
+            if use_amp:
+                with torch.cuda.amp.autocast():
+                    loss = loss_function(
+                        model, batch, noise, vocab_size,
+                        sampling_eps=config['noise']['sigma_min']
+                    )
+
+                optimizer.zero_grad()
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                loss = loss_function(
+                    model, batch, noise, vocab_size,
+                    sampling_eps=config['noise']['sigma_min']
+                )
+
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
 
             epoch_loss += loss.item()
             num_batches += 1
