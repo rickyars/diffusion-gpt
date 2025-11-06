@@ -157,6 +157,7 @@ def train_model(
     eval_interval = config['training']['eval_interval']
     save_interval = config['training']['save_interval']
     log_interval = config['training']['log_interval']
+    use_compile = config['training'].get('use_compile', False)  # Default to False for compatibility
 
     # Paths
     models_dir = config['paths']['models_dir']
@@ -214,15 +215,19 @@ def train_model(
     print(f"\nModel parameters: {model.get_num_params() / 1e6:.2f}M")
 
     # Compile model for faster training (PyTorch 2.0+)
-    # Note: May not work on Windows without Triton
-    if hasattr(torch, 'compile') and device.type == 'cuda':
+    # Note: Requires Triton, may not work on Windows
+    if use_compile and hasattr(torch, 'compile') and device.type == 'cuda':
         try:
-            print("Attempting to compile model with torch.compile()...")
+            print("Compiling model with torch.compile() (set use_compile: false in config to disable)...")
             model = torch.compile(model)
-            print("✓ Model compiled successfully - expect faster training!")
+            print("✓ Model compiled successfully - expect 30-50% faster training!")
         except Exception as e:
-            print(f"⚠ torch.compile() failed (this is OK): {str(e)[:100]}")
+            print(f"⚠ torch.compile() failed: {str(e)[:100]}")
+            print("  Set 'use_compile: false' in config.yaml to disable this attempt")
             print("  Continuing with eager mode (slightly slower but works fine)")
+    elif not use_compile:
+        print("torch.compile() disabled (use_compile: false in config)")
+        print("Enable with 'use_compile: true' if you have Triton installed")
 
     # Initialize optimizer
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
