@@ -5,6 +5,7 @@ Supports training on single dataset or multiple datasets sequentially.
 
 import argparse
 import os
+import signal
 import sys
 from typing import Optional
 
@@ -242,48 +243,68 @@ def train_model(
         start_epoch = checkpoint['epoch'] + 1
         print(f"Resuming from epoch {start_epoch}")
 
-    # Training loop
+    # Training loop with graceful shutdown handling
     print("\nStarting training...")
+    print("Press Ctrl+C to save progress and exit gracefully\n")
     model.train()
 
-    for epoch in range(start_epoch, epochs):
-        epoch_loss = 0.0
-        num_batches = 0
+    # Flag for graceful shutdown
+    should_stop = False
 
-        for batch_idx, batch in enumerate(train_loader):
-            batch = batch.to(device, non_blocking=True)
+    def signal_handler(sig, frame):
+        nonlocal should_stop
+        print("\n\nReceived interrupt signal. Saving checkpoint and exiting gracefully...")
+        print("(Press Ctrl+C again to force quit without saving)")
+        should_stop = True
 
-            # Mixed precision training
-            if use_amp:
-                with torch.cuda.amp.autocast():
+    # Register signal handler for graceful shutdown
+    original_handler = signal.signal(signal.SIGINT, signal_handler)
+
+    try:
+        for epoch in range(start_epoch, epochs):
+            if should_stop:
+                break
+
+            epoch_loss = 0.0
+            num_batches = 0
+
+            for batch_idx, batch in enumerate(train_loader):
+                if should_stop:
+                    break
+
+                batch = batch.to(device, non_blocking=True)
+
+                # Mixed precision training
+                if use_amp:
+                    with torch.cuda.amp.autocast():
+                        loss = loss_function(
+                            model, batch, noise, vocab_size,
+                            sampling_eps=config['noise']['sigma_min']
+                        )
+
+                    optimizer.zero_grad()
+                    scaler.scale(loss).backward()
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
                     loss = loss_function(
                         model, batch, noise, vocab_size,
                         sampling_eps=config['noise']['sigma_min']
                     )
 
-                optimizer.zero_grad()
-                scaler.scale(loss).backward()
-                scaler.step(optimizer)
-                scaler.update()
-            else:
-                loss = loss_function(
-                    model, batch, noise, vocab_size,
-                    sampling_eps=config['noise']['sigma_min']
-                )
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
 
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
+                epoch_loss += loss.item()
+                num_batches += 1
 
-            epoch_loss += loss.item()
-            num_batches += 1
+                if (batch_idx + 1) % log_interval == 0:
+                    print(f"Epoch [{epoch+1}/{epochs}] Batch [{batch_idx+1}/{len(train_loader)}] "
+                          f"Loss: {loss.item():.4f}")
 
-            if (batch_idx + 1) % log_interval == 0:
-                print(f"Epoch [{epoch+1}/{epochs}] Batch [{batch_idx+1}/{len(train_loader)}] "
-                      f"Loss: {loss.item():.4f}")
-
-        avg_train_loss = epoch_loss / num_batches
-        print(f"\nEpoch [{epoch+1}/{epochs}] Average Train Loss: {avg_train_loss:.4f}")
+            avg_train_loss = epoch_loss / num_batches if num_batches > 0 else 0.0
+            print(f"\nEpoch [{epoch+1}/{epochs}] Average Train Loss: {avg_train_loss:.4f}")
 
         # Validation
         if (epoch + 1) % eval_interval == 0:
@@ -317,17 +338,41 @@ def train_model(
             torch.save(checkpoint, checkpoint_path)
             print(f"Saved checkpoint: {checkpoint_path}\n")
 
-    # Save final model
-    final_checkpoint = {
-        'epoch': epochs - 1,
-        'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-        'config': model_config.__dict__,
-        'vocab_size': vocab_size,
-        'loss': avg_train_loss,
-    }
-    torch.save(final_checkpoint, model_path)
-    print(f"\nTraining completed! Final model saved to: {model_path}")
+    except KeyboardInterrupt:
+        # Second Ctrl+C - force quit
+        print("\nForce quit - checkpoint not saved!")
+        raise
+    finally:
+        # Restore original signal handler
+        signal.signal(signal.SIGINT, original_handler)
+
+    # Save final or interrupted checkpoint
+    if should_stop:
+        print("\nSaving interrupted training checkpoint...")
+        interrupted_checkpoint = {
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'config': model_config.__dict__,
+            'vocab_size': vocab_size,
+            'loss': avg_train_loss if num_batches > 0 else float('inf'),
+        }
+        interrupted_path = os.path.join(models_dir, f"{dataset_name}_interrupted_epoch_{epoch+1}.pt")
+        torch.save(interrupted_checkpoint, interrupted_path)
+        print(f"Interrupted checkpoint saved to: {interrupted_path}")
+        print("You can resume training with: python train.py --dataset {dataset_name} --resume {interrupted_path}")
+    else:
+        # Normal completion - save final model
+        final_checkpoint = {
+            'epoch': epochs - 1,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'config': model_config.__dict__,
+            'vocab_size': vocab_size,
+            'loss': avg_train_loss,
+        }
+        torch.save(final_checkpoint, model_path)
+        print(f"\nTraining completed! Final model saved to: {model_path}")
 
 
 def main():
