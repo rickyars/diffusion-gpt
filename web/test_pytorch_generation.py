@@ -1,21 +1,36 @@
 """
 Quick test to verify PyTorch model generates coherent text.
 This will tell us if the checkpoint is actually trained.
+
+USAGE:
+    python test_pytorch_generation.py --model ../models/shakespear.pt
 """
 import sys
 import os
+import argparse
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import torch
 from model import GPT, GPTConfig
 from utils import GeometricNoise, staggered_score, transition, sample_categorical, decode
 
+# Parse arguments
+parser = argparse.ArgumentParser(description='Test PyTorch model generation')
+parser.add_argument('--model', type=str, default='../pretrained_model/model_epoch_25.pth',
+                    help='Path to model checkpoint (e.g., ../models/shakespear.pt)')
+args = parser.parse_args()
+
 print("="*70)
 print("TESTING PYTORCH MODEL GENERATION")
 print("="*70)
 
 # Load checkpoint
-checkpoint_path = '../pretrained_model/model_epoch_25.pth'
+checkpoint_path = args.model
+if not os.path.exists(checkpoint_path):
+    print(f"\n❌ ERROR: Model checkpoint not found: {checkpoint_path}")
+    print("\nUsage: python test_pytorch_generation.py --model ../models/shakespear.pt")
+    sys.exit(1)
+
 print(f"\nLoading checkpoint: {checkpoint_path}")
 checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
 
