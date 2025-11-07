@@ -27,6 +27,7 @@ class CharacterDataset(data.Dataset):
         split: str = "train",
         val_split: float = 0.1,
         vocab_path: Optional[str] = None,
+        max_chars: Optional[int] = None,
     ):
         """
         Args:
@@ -35,6 +36,7 @@ class CharacterDataset(data.Dataset):
             split: 'train' or 'val'
             val_split: Fraction of data to use for validation
             vocab_path: Optional path to load existing vocabulary pickle
+            max_chars: Optional maximum number of characters to load (None = load all)
         """
         self.context_len = context_len
         self.split = split
