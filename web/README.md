@@ -42,6 +42,7 @@ Update URLs in `index.html`, then upload `index.html`.
 - **`test_server.py`** - Local development server with CORS headers
 - **`debug.html`** - Interactive debugging tool with extensive logging
 - **`debug_python.py`** - Python reference script for comparison
+- **`quick_test.html`** - Fast model diagnostic (check if model works)
 - **`DEBUGGING_GUIDE.md`** - Comprehensive debugging guide
 
 ## Documentation
