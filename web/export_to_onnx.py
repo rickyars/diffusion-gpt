@@ -38,13 +38,77 @@ def export_model_to_onnx(
     print(f"Loading checkpoint from: {checkpoint_path}")
     checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
 
-    # Extract model config
+    # Inspect checkpoint structure
+    print(f"Checkpoint keys: {list(checkpoint.keys())[:10]}...")  # Show first 10 keys
+
+    # Extract model config - handle different checkpoint formats
     if 'config' in checkpoint:
+        print("Found 'config' in checkpoint")
         model_config_dict = checkpoint['config']
         model_config = GPTConfig(**model_config_dict)
-        print(f"Model config loaded from checkpoint")
+    elif 'model_args' in checkpoint:
+        print("Found 'model_args' in checkpoint")
+        model_config_dict = checkpoint['model_args']
+        model_config = GPTConfig(**model_config_dict)
     else:
-        raise ValueError("Model config not found in checkpoint")
+        print("⚠️  No config found in checkpoint, inferring from state_dict...")
+        # Try to infer config from model structure
+        state_dict = checkpoint.get('model_state_dict', checkpoint.get('model', checkpoint))
+
+        # Extract dimensions from the state dict
+        if 'transformer.wte.weight' in state_dict:
+            vocab_size_inferred = state_dict['transformer.wte.weight'].shape[0]
+            n_embd = state_dict['transformer.wte.weight'].shape[1]
+        else:
+            vocab_size_inferred = 65  # Default Shakespeare vocab
+            n_embd = 384  # Default from config
+
+        # Count layers
+        layer_count = 0
+        for key in state_dict.keys():
+            if key.startswith('transformer.h.'):
+                layer_num = int(key.split('.')[2])
+                layer_count = max(layer_count, layer_num + 1)
+        n_layer = layer_count if layer_count > 0 else 6
+
+        # Infer block_size from position embeddings
+        if 'transformer.wpe.weight' in state_dict:
+            block_size = state_dict['transformer.wpe.weight'].shape[0]
+        else:
+            block_size = 256  # Default
+
+        # Infer cond_dim from sigma_map layer size
+        if 'sigma_map.mlp.0.weight' in state_dict:
+            # sigma_map.mlp.0.weight has shape [cond_dim, 256]
+            cond_dim = state_dict['sigma_map.mlp.0.weight'].shape[0]
+        else:
+            cond_dim = 128  # Default
+
+        n_head = 6  # Default, hard to infer reliably
+
+        print(f"  Inferred: vocab_size={vocab_size_inferred}, n_embd={n_embd}, n_layer={n_layer}, "
+              f"block_size={block_size}, cond_dim={cond_dim}")
+
+        model_config = GPTConfig(
+            block_size=block_size,
+            vocab_size=vocab_size_inferred,
+            n_layer=n_layer,
+            n_head=n_head,
+            n_embd=n_embd,
+            cond_dim=cond_dim,
+            dropout=0.0,
+            bias=False
+        )
+        model_config_dict = {
+            'block_size': block_size,
+            'vocab_size': vocab_size_inferred,
+            'n_layer': n_layer,
+            'n_head': n_head,
+            'n_embd': n_embd,
+            'cond_dim': cond_dim,
+            'dropout': 0.0,
+            'bias': False
+        }
 
     vocab_size = checkpoint.get('vocab_size', model_config.vocab_size)
     print(f"Vocab size: {vocab_size}")
@@ -52,7 +116,16 @@ def export_model_to_onnx(
     # Initialize model
     print("Initializing model...")
     model = GPT(model_config)
-    model.load_state_dict(checkpoint['model_state_dict'])
+
+    # Load state dict - handle different checkpoint structures
+    if 'model_state_dict' in checkpoint:
+        model.load_state_dict(checkpoint['model_state_dict'])
+    elif 'model' in checkpoint:
+        model.load_state_dict(checkpoint['model'])
+    else:
+        # Assume the checkpoint IS the state dict
+        model.load_state_dict(checkpoint)
+
     model.eval()
 
     print(f"Model parameters: {model.get_num_params() / 1e6:.2f}M")
