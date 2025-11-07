@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Discrete Diffusion Text Generation - Live Demo</title>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.16.3/dist/ort.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Monaco', 'Courier New', monospace;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            color: #fff;
+        }
+
+        .container {
+            max-width: 900px;
+            width: 100%;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            color: #333;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 10px;
+            color: #667eea;
+            font-size: 2em;
+        }
+
+        .subtitle {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #666;
+            font-size: 0.9em;
+        }
+
+        .info-box {
+            background: #f0f4ff;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            margin-bottom: 25px;
+            border-radius: 5px;
+            font-size: 0.9em;
+        }
+
+        .config-section {
+            background: #fff9e6;
+            border: 2px solid #ffc107;
+            padding: 15px;
+            margin-bottom: 25px;
+            border-radius: 5px;
+            font-size: 0.85em;
+        }
+
+        .config-section h3 {
+            color: #f57c00;
+            margin-bottom: 10px;
+        }
+
+        .config-urls {
+            display: grid;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .url-input {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .url-input label {
+            font-weight: bold;
+            color: #666;
+        }
+
+        .url-input input {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 0.85em;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+
+        .stat-box {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 10px;
+            border: 2px solid #e0e0e0;
+        }
+
+        .stat-label {
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .stat-value {
+            font-size: 1.4em;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .output-container {
+            background: #1e1e1e;
+            border-radius: 10px;
+            padding: 25px;
+            margin-bottom: 25px;
+            min-height: 400px;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 0.95em;
+            line-height: 1.6;
+            color: #d4d4d4;
+            position: relative;
+            overflow-y: auto;
+            max-height: 600px;
+        }
+
+        .step-indicator {
+            position: sticky;
+            top: 0;
+            background: #2d2d2d;
+            padding: 10px;
+            margin: -25px -25px 15px -25px;
+            border-radius: 10px 10px 0 0;
+            border-bottom: 2px solid #667eea;
+            z-index: 10;
+        }
+
+        .step-label {
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .noise-level {
+            font-size: 0.85em;
+            color: #888;
+            margin-left: 15px;
+        }
+
+        .text-output {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .char {
+            display: inline-block;
+            transition: all 0.3s ease;
+        }
+
+        .char.changed {
+            background-color: rgba(102, 126, 234, 0.3);
+            animation: highlight 0.6s ease;
+        }
+
+        @keyframes highlight {
+            0%, 100% { background-color: rgba(102, 126, 234, 0.3); }
+            50% { background-color: rgba(102, 126, 234, 0.6); }
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 1em;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: bold;
+        }
+
+        button:hover:not(:disabled) {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        button:active:not(:disabled) {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: #e0e0e0;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-bottom: 25px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 0.85em;
+            color: #666;
+        }
+
+        .footer a {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        .footer a:hover {
+            text-decoration: underline;
+        }
+
+        .seed-info {
+            font-size: 0.85em;
+            color: #888;
+            font-style: italic;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #667eea;
+            font-weight: bold;
+        }
+
+        .error {
+            background: #fee;
+            border: 2px solid #f66;
+            color: #c33;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+
+        .success {
+            background: #efe;
+            border: 2px solid #6c6;
+            color: #363;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🌊 Discrete Diffusion Text Generation</h1>
+        <p class="subtitle">Real PyTorch model running in your browser via ONNX.js</p>
+
+        <div class="info-box">
+            <strong>How it works:</strong> This demo loads a trained discrete diffusion model and runs inference directly in your browser.
+            Starting from random noise (random characters), the model iteratively denoises the text over multiple steps,
+            gradually revealing coherent Shakespeare-style text. The seed changes every minute based on system time.
+        </div>
+
+        <div class="config-section">
+            <h3>⚙️ Model Configuration (for Arweave/IPFS deployment)</h3>
+            <p style="margin-bottom: 10px; color: #666;">
+                Configure URLs to load model files from Arweave or use local files for testing
+            </p>
+            <div class="config-urls">
+                <div class="url-input">
+                    <label>ONNX Model URL:</label>
+                    <input type="text" id="modelUrl" value="./web_demo/model.onnx" placeholder="https://arweave.net/...">
+                </div>
+                <div class="url-input">
+                    <label>Vocabulary JSON URL:</label>
+                    <input type="text" id="vocabUrl" value="./web_demo/vocab.json" placeholder="https://arweave.net/...">
+                </div>
+                <div class="url-input">
+                    <label>Metadata JSON URL:</label>
+                    <input type="text" id="metadataUrl" value="./web_demo/metadata.json" placeholder="https://arweave.net/...">
+                </div>
+            </div>
+            <button onclick="loadModel()" style="margin-top: 15px;">📥 Load Model</button>
+        </div>
+
+        <div id="messageArea"></div>
+
+        <div class="stats">
+            <div class="stat-box">
+                <div class="stat-label">Current Seed</div>
+                <div class="stat-value" id="currentSeed">0</div>
+                <div class="seed-info">Updates every minute</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">Model Status</div>
+                <div class="stat-value" id="modelStatus" style="font-size: 1em;">Not Loaded</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">Sequence Length</div>
+                <div class="stat-value" id="seqLength">-</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">Denoising Steps</div>
+                <div class="stat-value" id="totalSteps">64</div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button id="startBtn" onclick="startGeneration()" disabled>▶ Start Generation</button>
+            <button id="pauseBtn" onclick="pauseGeneration()" disabled>⏸ Pause</button>
+            <button id="resetBtn" onclick="resetGeneration()" disabled>🔄 Reset</button>
+        </div>
+
+        <div class="progress-bar">
+            <div class="progress-fill" id="progressBar"></div>
+        </div>
+
+        <div class="output-container">
+            <div class="step-indicator">
+                <span class="step-label">Status:</span>
+                <span id="statusText">Load model to begin</span>
+                <span class="noise-level" id="noiseLevel"></span>
+            </div>
+            <div class="text-output" id="textOutput">
+                Click "Load Model" above to download the model files, then click "Start Generation" to begin...
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>
+                Based on <a href="https://arxiv.org/abs/2310.16834" target="_blank">Discrete Diffusion Modeling by Estimating the Ratios of the Data Distribution</a>
+            </p>
+            <p style="margin-top: 10px;">
+                <a href="https://github.com/ash80/diffusion-gpt" target="_blank">View source on GitHub</a>
+            </p>
+        </div>
+    </div>
+
+    <script>
+        // Global state
+        let session = null;
+        let vocab = null;
+        let metadata = null;
+        let currentSequence = [];
+        let currentStep = 0;
+        let isPaused = false;
+        let isRunning = false;
+        let currentSeed = 0;
+        let rng = null;
+
+        // Configuration
+        const config = {
+            steps: 64,
+            sigmaMin: 0.0001,
+            sigmaMax: 20.0,
+            delayMs: 150  // delay between denoising steps for visualization
+        };
+
+        // Simple seeded random number generator (Mulberry32)
+        class SeededRandom {
+            constructor(seed) {
+                this.seed = seed;
+            }
+
+            random() {
+                let t = this.seed += 0x6D2B79F5;
+                t = Math.imul(t ^ t >>> 15, t | 1);
+                t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+                return ((t ^ t >>> 14) >>> 0) / 4294967296;
+            }
+
+            randint(min, max) {
+                return Math.floor(this.random() * (max - min)) + min;
+            }
+        }
+
+        // Get seed from current minute
+        function getCurrentMinuteSeed() {
+            const now = new Date();
+            return Math.floor(now.getTime() / 60000);
+        }
+
+        // Update seed display
+        function updateSeedDisplay() {
+            currentSeed = getCurrentMinuteSeed();
+            document.getElementById('currentSeed').textContent = currentSeed;
+        }
+
+        // Initialize RNG with current seed
+        function initializeRNG() {
+            currentSeed = getCurrentMinuteSeed();
+            rng = new SeededRandom(currentSeed);
+            updateSeedDisplay();
+        }
+
+        // Show message
+        function showMessage(text, type = 'info') {
+            const messageArea = document.getElementById('messageArea');
+            const className = type === 'error' ? 'error' : type === 'success' ? 'success' : 'loading';
+            messageArea.innerHTML = `<div class="${className}">${text}</div>`;
+        }
+
+        function clearMessage() {
+            document.getElementById('messageArea').innerHTML = '';
+        }
+
+        // Load model and vocabulary
+        async function loadModel() {
+            const modelUrl = document.getElementById('modelUrl').value;
+            const vocabUrl = document.getElementById('vocabUrl').value;
+            const metadataUrl = document.getElementById('metadataUrl').value;
+
+            if (!modelUrl || !vocabUrl || !metadataUrl) {
+                showMessage('Please provide all URLs', 'error');
+                return;
+            }
+
+            try {
+                showMessage('Loading model files...');
+                document.getElementById('modelStatus').textContent = 'Loading...';
+
+                // Load metadata
+                console.log('Fetching metadata from:', metadataUrl);
+                const metadataResponse = await fetch(metadataUrl);
+                if (!metadataResponse.ok) throw new Error(`Failed to load metadata: ${metadataResponse.statusText}`);
+                metadata = await metadataResponse.json();
+                console.log('Metadata loaded:', metadata);
+
+                // Load vocabulary
+                console.log('Fetching vocabulary from:', vocabUrl);
+                const vocabResponse = await fetch(vocabUrl);
+                if (!vocabResponse.ok) throw new Error(`Failed to load vocabulary: ${vocabResponse.statusText}`);
+                vocab = await vocabResponse.json();
+                console.log('Vocabulary loaded, size:', Object.keys(vocab.itos).length);
+
+                // Load ONNX model
+                console.log('Fetching ONNX model from:', modelUrl);
+                showMessage('Loading ONNX model (this may take a minute)...');
+                session = await ort.InferenceSession.create(modelUrl);
+                console.log('ONNX session created successfully');
+
+                // Update UI
+                document.getElementById('modelStatus').textContent = '✓ Loaded';
+                document.getElementById('seqLength').textContent = metadata.block_size;
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('resetBtn').disabled = false;
+
+                showMessage('Model loaded successfully! Ready to generate.', 'success');
+                setTimeout(clearMessage, 3000);
+
+                initializeRNG();
+
+            } catch (error) {
+                console.error('Error loading model:', error);
+                showMessage(`Error loading model: ${error.message}`, 'error');
+                document.getElementById('modelStatus').textContent = '✗ Error';
+            }
+        }
+
+        // Geometric noise schedule
+        function geometricNoise(t) {
+            const { sigmaMin, sigmaMax } = config;
+            const barSigma = Math.pow(sigmaMin, 1 - t) * Math.pow(sigmaMax, t);
+            return barSigma;
+        }
+
+        // Run model inference
+        async function runModel(inputIds, sigma) {
+            const inputIdsTensor = new ort.Tensor('int64', BigInt64Array.from(inputIds.map(x => BigInt(x))), [1, inputIds.length]);
+            const sigmaTensor = new ort.Tensor('float32', new Float32Array([sigma]), [1]);
+
+            const feeds = {
+                'input_ids': inputIdsTensor,
+                'sigma': sigmaTensor
+            };
+
+            const results = await session.run(feeds);
+            const logits = results.logits.data;
+
+            // Reshape to [seq_len, vocab_size]
+            const seqLen = inputIds.length;
+            const vocabSize = metadata.vocab_size;
+            const logitsArray = [];
+
+            for (let i = 0; i < seqLen; i++) {
+                const row = [];
+                for (let j = 0; j < vocabSize; j++) {
+                    row.push(logits[i * vocabSize + j]);
+                }
+                logitsArray.push(row);
+            }
+
+            return logitsArray;
+        }
+
+        // Sample from categorical distribution
+        function sampleCategorical(probs) {
+            const sum = probs.reduce((a, b) => a + b, 0);
+            const normalized = probs.map(p => p / sum);
+
+            const r = rng.random();
+            let cumsum = 0;
+            for (let i = 0; i < normalized.length; i++) {
+                cumsum += normalized[i];
+                if (r < cumsum) {
+                    return i;
+                }
+            }
+            return normalized.length - 1;
+        }
+
+        // Transition kernel
+        function computeTransition(currentIdx, deltaSigma, vocabSize) {
+            const trans = new Array(vocabSize).fill(0);
+            const baseProb = (1 - Math.exp(-deltaSigma)) / vocabSize;
+
+            for (let i = 0; i < vocabSize; i++) {
+                trans[i] = baseProb;
+            }
+            trans[currentIdx] = 0;
+
+            const diagFill = 1 - trans.reduce((a, b) => a + b, 0);
+            trans[currentIdx] = diagFill;
+
+            return trans;
+        }
+
+        // Staggered score correction
+        function staggeredScore(score, deltaSigma, vocabSize) {
+            const expFactor = Math.exp(-deltaSigma);
+            const scoreSum = score.reduce((a, b) => a + b, 0);
+            const correction = ((expFactor - 1) / (vocabSize * expFactor)) * scoreSum;
+
+            return score.map(s => correction + s / expFactor);
+        }
+
+        // Initialize sequence with random characters
+        function initializeSequence() {
+            initializeRNG();
+            const seqLen = metadata.block_size;
+            const vocabSize = metadata.vocab_size;
+
+            currentSequence = [];
+            for (let i = 0; i < seqLen; i++) {
+                currentSequence.push(rng.randint(0, vocabSize));
+            }
+            currentStep = 0;
+            updateDisplay();
+        }
+
+        // Perform one denoising step
+        async function denoisingStep() {
+            const eps = 1e-5;
+            const t = 1 - (currentStep / config.steps) * (1 - eps);
+            const tNext = 1 - ((currentStep + 1) / config.steps) * (1 - eps);
+
+            const currSigma = geometricNoise(t);
+            const nextSigma = currentStep < config.steps - 1 ? geometricNoise(tNext) : 0;
+            const deltaSigma = currSigma - nextSigma;
+
+            const prevSequence = [...currentSequence];
+
+            // Run model inference
+            const logScores = await runModel(currentSequence, currSigma);
+
+            // Convert log scores to scores (exp)
+            const scores = logScores.map(row => row.map(x => Math.exp(x)));
+
+            const vocabSize = metadata.vocab_size;
+
+            // Denoise each position
+            for (let pos = 0; pos < currentSequence.length; pos++) {
+                const currentIdx = currentSequence[pos];
+                const score = scores[pos];
+
+                // Apply staggered score
+                const stagScore = staggeredScore(score, deltaSigma, vocabSize);
+
+                // Get transition probabilities
+                const trans = computeTransition(currentIdx, deltaSigma, vocabSize);
+
+                // Combine score and transition
+                const probs = stagScore.map((s, i) => s * trans[i]);
+
+                // Sample new character
+                currentSequence[pos] = sampleCategorical(probs);
+            }
+
+            currentStep++;
+            updateDisplay(prevSequence);
+
+            return currentStep < config.steps;
+        }
+
+        // Decode sequence to text
+        function decodeSequence(sequence) {
+            return sequence.map(idx => vocab.itos[idx.toString()]).join('');
+        }
+
+        // Update display
+        function updateDisplay(prevSequence = null) {
+            const text = decodeSequence(currentSequence);
+            const outputDiv = document.getElementById('textOutput');
+
+            if (prevSequence) {
+                // Highlight changed characters
+                let html = '';
+                for (let i = 0; i < currentSequence.length; i++) {
+                    const char = vocab.itos[currentSequence[i].toString()];
+                    const displayChar = char === '\n' ? '↵\n' : char;
+                    const changed = currentSequence[i] !== prevSequence[i];
+                    html += `<span class="char ${changed ? 'changed' : ''}">${displayChar}</span>`;
+                }
+                outputDiv.innerHTML = html;
+            } else {
+                outputDiv.textContent = text.replace(/\n/g, '↵\n');
+            }
+
+            // Update stats
+            const progress = (currentStep / config.steps) * 100;
+            document.getElementById('progressBar').style.width = progress + '%';
+
+            const t = 1 - (currentStep / config.steps);
+            const sigma = geometricNoise(t);
+
+            document.getElementById('statusText').textContent =
+                `Step ${currentStep}/${config.steps}`;
+            document.getElementById('noiseLevel').textContent =
+                `σ = ${sigma.toFixed(4)}`;
+        }
+
+        // Animation loop
+        async function runGeneration() {
+            if (isPaused || !isRunning) return;
+
+            const continueRunning = await denoisingStep();
+
+            if (continueRunning && isRunning && !isPaused) {
+                setTimeout(runGeneration, config.delayMs);
+            } else {
+                isRunning = false;
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('pauseBtn').disabled = true;
+
+                if (currentStep >= config.steps) {
+                    document.getElementById('statusText').textContent =
+                        'Generation complete!';
+                }
+            }
+        }
+
+        // Control functions
+        function startGeneration() {
+            if (currentStep === 0) {
+                initializeSequence();
+            }
+
+            isRunning = true;
+            isPaused = false;
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('pauseBtn').disabled = false;
+
+            runGeneration();
+        }
+
+        function pauseGeneration() {
+            isPaused = true;
+            isRunning = false;
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('pauseBtn').disabled = true;
+            document.getElementById('statusText').textContent = 'Paused';
+        }
+
+        function resetGeneration() {
+            isPaused = false;
+            isRunning = false;
+            currentStep = 0;
+
+            if (session && vocab && metadata) {
+                initializeSequence();
+            }
+
+            document.getElementById('startBtn').disabled = !session;
+            document.getElementById('pauseBtn').disabled = true;
+            document.getElementById('progressBar').style.width = '0%';
+            document.getElementById('statusText').textContent = 'Ready to generate';
+            document.getElementById('noiseLevel').textContent = '';
+        }
+
+        // Update seed display every second
+        setInterval(updateSeedDisplay, 1000);
+
+        // Initialize
+        updateSeedDisplay();
+        document.getElementById('totalSteps').textContent = config.steps;
+    </script>
+</body>
+</html>
