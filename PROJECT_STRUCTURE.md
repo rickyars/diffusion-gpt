@@ -69,41 +69,24 @@ python generate.py --model models/shakespeare.pt --samples 5
 
 ---
 
-## 🌐 Web Demo Files
+## 🌐 Web Demo Files (`web/` folder)
 
-### `index.html` ⭐ **Browser-based demo**
-**What it does**: Standalone HTML page that runs the model in your browser using ONNX.js.
+All browser-based demo files are in the `web/` directory to keep the main project clean.
 
-**Why you need it**: For deploying to Arweave/IPFS or running demos without Python.
+**See `web/README.md` for detailed instructions.**
 
-**Usage**: Open in browser after exporting model to ONNX.
-
----
-
-### `export_to_onnx.py` ⭐ **Model export script**
-**What it does**: Converts PyTorch `.pt` models to ONNX format for browser use.
-
-**Why you need it**: Required before using `index.html`. Creates:
-- `web_demo/model.onnx` (browser-compatible model)
-- `web_demo/vocab.json` (character mappings)
-- `web_demo/metadata.json` (config)
+Quick overview:
+- **`web/index.html`** - Main browser demo with ONNX.js
+- **`web/diffusion_demo.html`** - Simple JavaScript demo (no model needed)
+- **`web/export_to_onnx.py`** - Converts models to ONNX format
+- **`web/test_server.py`** - Local development server
 
 **Usage**:
 ```bash
-python export_to_onnx.py
-```
-
----
-
-### `test_server.py` 🔧 **Local development server**
-**What it does**: Simple HTTP server with proper CORS headers for testing the web demo locally.
-
-**Why you need it**: For testing `index.html` before deploying to Arweave.
-
-**Usage**:
-```bash
-python test_server.py
-# Then open http://localhost:8000/index.html
+cd web
+python export_to_onnx.py  # Export model
+python test_server.py     # Test locally
+# Open http://localhost:8000/index.html
 ```
 
 ---
@@ -217,8 +200,8 @@ Put your `.txt` files here (one document per line).
 ### `outputs/` - Generated text & animations
 Output from `generate.py` and `generate_animation.py`.
 
-### `web_demo/` - ONNX exports
-Created by `export_to_onnx.py` for browser inference.
+### `web/` - Browser demo files
+All web-based demo files and ONNX exports. See `web/README.md`.
 
 ### `pretrained_model/` - Pre-trained weights
 Contains `model_epoch_25.pth` (trained on Shakespeare).
@@ -244,8 +227,9 @@ python generate_animation.py --model models/your_text.pt
 
 **To deploy to web:**
 ```bash
-python export_to_onnx.py
-python test_server.py  # test locally
+cd web
+python export_to_onnx.py  # Export model
+python test_server.py     # Test locally
 # Then upload to Arweave/IPFS
 ```
 
@@ -270,7 +254,7 @@ python test_server.py  # test locally
 → Use `generate.py`
 
 **"I want to deploy to Arweave"**
-→ Use `export_to_onnx.py` + `index.html`
+→ Check `web/` folder and run `export_to_onnx.py`
 
 **"I want cool GIF animations"**
 → Use `generate_animation.py`
