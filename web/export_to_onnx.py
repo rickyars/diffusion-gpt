@@ -2,23 +2,28 @@
 Export the trained PyTorch model to ONNX format for browser inference.
 
 USAGE:
-    pip3 install -r requirements.txt
-    python3 export_to_onnx.py
+    cd web
+    python export_to_onnx.py
 
-This will create a web_demo/ directory with:
+This will create a demo/ directory with:
     - model.onnx (~45MB) - ONNX format model
     - vocab.json (<1KB) - Character vocabulary
     - metadata.json (<1KB) - Model configuration
 """
 import os
+import sys
 import json
 import pickle
+
+# Add parent directory to path to import model
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
 import torch
 from model import GPT, GPTConfig
 
 def export_model_to_onnx(
-    checkpoint_path: str = 'pretrained_model/model_epoch_25.pth',
-    output_dir: str = 'web_demo',
+    checkpoint_path: str = '../pretrained_model/model_epoch_25.pth',
+    output_dir: str = './demo',
     opset_version: int = 15
 ):
     """

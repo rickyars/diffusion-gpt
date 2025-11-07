@@ -1,7 +1,7 @@
 """
 Simple HTTP server for testing the web demo locally.
-Run with: python3 test_server.py
-Then open: http://localhost:8000
+Run from the web/ directory: python test_server.py
+Then open: http://localhost:8000/index.html
 """
 import http.server
 import socketserver
