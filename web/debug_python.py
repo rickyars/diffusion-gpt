@@ -283,7 +283,7 @@ def test_denoising_step(model, itos, stoi, vocab_size, model_config):
     """Test a complete denoising step."""
     print_section("TESTING ONE DENOISING STEP")
 
-    from utils import geometricNoise, staggered_score, transition, sample_categorical
+    from utils import GeometricNoise, staggered_score, transition, sample_categorical
 
     # Initialize random sequence
     torch.manual_seed(42)
