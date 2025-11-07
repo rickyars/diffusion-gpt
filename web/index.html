@@ -650,6 +650,8 @@
             const vocabSize = metadata.vocab_size;
 
             // Denoise each position
+            // IMPORTANT: Create new sequence array to avoid modifying while iterating
+            const newSequence = [];
             for (let pos = 0; pos < currentSequence.length; pos++) {
                 const currentIdx = currentSequence[pos];
                 const score = scores[pos];
@@ -664,8 +666,11 @@
                 const probs = stagScore.map((s, i) => s * trans[i]);
 
                 // Sample new character
-                currentSequence[pos] = sampleCategorical(probs);
+                newSequence[pos] = sampleCategorical(probs);
             }
+
+            // Update sequence after all positions have been sampled
+            currentSequence = newSequence;
 
             currentStep++;
             updateDisplay(prevSequence);
