@@ -97,7 +97,14 @@ def test_pytorch_inference():
         else:
             n_head = 6
 
-        print(f"  Inferred: vocab_size={vocab_size_inferred}, n_embd={n_embd}, n_layer={n_layer}, block_size={block_size}")
+        # Infer cond_dim from sigma_map layer size
+        if 'sigma_map.mlp.0.weight' in state_dict:
+            # sigma_map.mlp.0.weight has shape [cond_dim, 256]
+            cond_dim = state_dict['sigma_map.mlp.0.weight'].shape[0]
+        else:
+            cond_dim = 128  # Default
+
+        print(f"  Inferred: vocab_size={vocab_size_inferred}, n_embd={n_embd}, n_layer={n_layer}, block_size={block_size}, cond_dim={cond_dim}")
 
         model_config = GPTConfig(
             block_size=block_size,
@@ -105,7 +112,7 @@ def test_pytorch_inference():
             n_layer=n_layer,
             n_head=n_head,
             n_embd=n_embd,
-            cond_dim=128,
+            cond_dim=cond_dim,
             dropout=0.0,
             bias=False
         )
@@ -115,7 +122,7 @@ def test_pytorch_inference():
             'n_layer': n_layer,
             'n_head': n_head,
             'n_embd': n_embd,
-            'cond_dim': 128,
+            'cond_dim': cond_dim,
             'dropout': 0.0,
             'bias': False
         }
