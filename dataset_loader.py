@@ -57,6 +57,11 @@ class CharacterDataset(data.Dataset):
         with open(data_path, 'r', encoding='utf-8') as f:
             text = f.read()
 
+        # Limit dataset size if specified
+        if max_chars is not None and len(text) > max_chars:
+            print(f"Limiting dataset to {max_chars:,} characters (original: {len(text):,})")
+            text = text[:max_chars]
+
         # Encode the entire text
         self.data = self._encode(text)
         print(f"Loaded {len(self.data):,} characters")
@@ -126,6 +131,7 @@ def get_data_loader(
     vocab_path: Optional[str] = None,
     shuffle: bool = True,
     num_workers: int = 0,
+    max_chars: Optional[int] = None,
 ) -> Tuple[data.DataLoader, int, Dict[int, str], Dict[str, int]]:
     """
     Create a DataLoader for character-level text data.
@@ -139,6 +145,7 @@ def get_data_loader(
         vocab_path: Optional path to vocabulary pickle
         shuffle: Whether to shuffle data
         num_workers: Number of data loading workers
+        max_chars: Optional maximum number of characters to load
 
     Returns:
         (dataloader, vocab_size, itos, stoi)
@@ -149,6 +156,7 @@ def get_data_loader(
         split=split,
         val_split=val_split,
         vocab_path=vocab_path,
+        max_chars=max_chars,
     )
 
     dataloader = data.DataLoader(
