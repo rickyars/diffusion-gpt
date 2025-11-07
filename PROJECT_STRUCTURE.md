@@ -139,12 +139,21 @@ python inspect_model.py
 ### `csv_to_dataset.py` 🔧 **CSV converter**
 **What it does**: Converts CSV files to `.txt` format for training.
 
-**Why you need it**: If you have data in CSV format, this extracts text columns.
+**Why you need it**: If you have data in CSV format (reviews, tweets, articles, etc.), this extracts text columns into the format needed for training.
 
 **Usage**:
 ```bash
-python csv_to_dataset.py --input data.csv --column text
+# Using column name
+python csv_to_dataset.py data.csv datasets/output.txt --column "text"
+
+# Using column index (0-based)
+python csv_to_dataset.py data.csv datasets/output.txt --column 0
+
+# Limit rows (for testing)
+python csv_to_dataset.py data.csv datasets/output.txt --column "review" --max-rows 10000
 ```
+
+**Full guide**: See [docs/CSV_DATASET_GUIDE.md](docs/CSV_DATASET_GUIDE.md) for detailed examples
 
 ---
 
