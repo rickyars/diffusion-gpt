@@ -14,6 +14,7 @@ import os
 import sys
 import json
 import pickle
+import argparse
 
 # Add parent directory to path to import model
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -147,4 +148,19 @@ def export_model_to_onnx(
     return onnx_path, vocab_json_path, metadata_path
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Export PyTorch model to ONNX')
+    parser.add_argument('--checkpoint', type=str, default='../pretrained_model/model_epoch_25.pth',
+                        help='Path to model checkpoint')
+    parser.add_argument('--output', type=str, default='./demo',
+                        help='Output directory for ONNX files')
+    parser.add_argument('--opset', type=int, default=15,
+                        help='ONNX opset version')
+    
+    args = parser.parse_args()
+    
+    export_model_to_onnx(
+        checkpoint_path=args.checkpoint,
+        output_dir=args.output,
+        opset_version=args.opset
+    )
     export_model_to_onnx()
