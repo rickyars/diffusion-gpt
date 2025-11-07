@@ -3,7 +3,7 @@ Export the trained PyTorch model to ONNX format for browser inference.
 
 USAGE:
     cd web
-    python export_to_onnx.py --checkpoint ../models/shakespear.pt
+    python export_to_onnx.py --checkpoint ../models/shakespeare.pt
 
 Options:
     --checkpoint PATH    Path to model checkpoint (default: ../pretrained_model/model_epoch_25.pth)
