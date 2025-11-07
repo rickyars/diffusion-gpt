@@ -16,6 +16,7 @@ training:
   save_interval: 5  # save checkpoint every N epochs
   log_interval: 100  # log loss every N batches (was 10, reduced I/O overhead)
   use_compile: false  # torch.compile() for faster training (requires Triton, may not work on Windows)
+  skip_completed: true  # skip datasets that have completed training (final .pt file exists)
 
 # Model architecture
 model:

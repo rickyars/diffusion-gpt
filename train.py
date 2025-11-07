@@ -168,6 +168,14 @@ def train_model(
     vocab_path = os.path.join(vocab_dir, f"{dataset_name}_vocab.pkl")
     model_path = os.path.join(models_dir, f"{dataset_name}.pt")
 
+    # Check if model already exists (skip completed training)
+    skip_completed = config['training'].get('skip_completed', True)
+    if skip_completed and os.path.exists(model_path) and not resume_from:
+        print(f"✓ Model already exists: {model_path}")
+        print(f"  Skipping training (set 'skip_completed: false' in config to retrain)")
+        print(f"{'='*80}\n")
+        return  # Skip this dataset
+
     # Create dataloaders
     print("Loading training data...")
     train_loader, vocab_size, itos, stoi = get_data_loader(
