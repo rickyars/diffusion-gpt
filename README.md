@@ -15,8 +15,6 @@ This project refactors the [original diffusion-gpt notebook](https://github.com/
 
 Based on the paper: [Discrete Diffusion Modeling by Estimating the Ratios of the Data Distribution](https://arxiv.org/abs/2310.16834)
 
-📖 **New to the project?** See [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) for a guide to what each file does.
-
 ## Project Structure
 
 ```
@@ -100,7 +98,7 @@ datasets:
     # max_chars: 1000000  # Optional: limit to 1M chars for faster training
 ```
 
-**Tip**: For large datasets, add `max_chars` to limit training time. See [docs/DATASET_SIZE_LIMITING.md](docs/DATASET_SIZE_LIMITING.md)
+**Tip**: For large datasets, add `max_chars` to limit training time for testing.
 
 ### 3. Train a Model
 
@@ -394,14 +392,12 @@ python train.py --dataset dataset_name
 
 Detailed guides have been organized in the `docs/` folder:
 
-- **[PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md)** - 🌟 **START HERE!** Explains what every file does
 - **[docs/CSV_DATASET_GUIDE.md](docs/CSV_DATASET_GUIDE.md)** - Converting CSV files to training format
 - **[docs/WEB_DEMO_README.md](docs/WEB_DEMO_README.md)** - Complete web demo documentation
-- **[docs/QUICK_START_WEB_DEMO.md](docs/QUICK_START_WEB_DEMO.md)** - Fast setup for browser inference
 - **[docs/ANIMATION_GUIDE.md](docs/ANIMATION_GUIDE.md)** - Creating animated GIFs
 - **[docs/CPU_INFERENCE_GUIDE.md](docs/CPU_INFERENCE_GUIDE.md)** - Running on CPU
 - **[docs/PERFORMANCE.md](docs/PERFORMANCE.md)** - Performance tips and benchmarks
-- **[docs/ORIGINAL_NOTEBOOK_README.md](docs/ORIGINAL_NOTEBOOK_README.md)** - About the Jupyter notebook
+- **[docs/conditional_generation.md](docs/conditional_generation.md)** - Conditional text generation guide
 
 ## How It Works
 
