@@ -9,10 +9,11 @@ This script:
 
 USAGE:
     cd web
-    python debug_python.py
+    python debug_python.py --model ../models/shakespear.pt
 """
 import sys
 import os
+import argparse
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import torch
@@ -42,12 +43,16 @@ def print_stats(name, data):
     print(f"  Has Inf: {np.isinf(data).any()}")
     print(f"  Sample (first 10): {data[:10]}")
 
-def test_pytorch_inference():
+def test_pytorch_inference(checkpoint_path='../pretrained_model/model_epoch_25.pth'):
     """Test PyTorch model inference."""
     print_section("TESTING PYTORCH MODEL")
 
     # Load checkpoint
-    checkpoint_path = '../pretrained_model/model_epoch_25.pth'
+    if not os.path.exists(checkpoint_path):
+        print(f"\n❌ ERROR: Model checkpoint not found: {checkpoint_path}")
+        print("\nUsage: python debug_python.py --model ../models/shakespear.pt")
+        return None
+
     print(f"\nLoading checkpoint: {checkpoint_path}")
     checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
 
@@ -456,11 +461,18 @@ def compare_outputs():
 
 def main():
     """Run all tests."""
+    # Parse arguments
+    parser = argparse.ArgumentParser(description='Debug PyTorch and ONNX inference')
+    parser.add_argument('--model', type=str, default='../pretrained_model/model_epoch_25.pth',
+                        help='Path to model checkpoint (e.g., ../models/shakespear.pt)')
+    args = parser.parse_args()
+
     print_section("DISCRETE DIFFUSION DEBUG SUITE")
     print("This script tests PyTorch and ONNX inference and identifies issues.")
+    print(f"\nModel: {args.model}")
 
     # Test PyTorch
-    result = test_pytorch_inference()
+    result = test_pytorch_inference(args.model)
     if result is None:
         print("\n❌ PyTorch test failed")
         return
