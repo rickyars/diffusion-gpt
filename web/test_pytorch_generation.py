@@ -34,8 +34,19 @@ if not os.path.exists(checkpoint_path):
 print(f"\nLoading checkpoint: {checkpoint_path}")
 checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
 
-# Infer config
-state_dict = checkpoint
+# Extract state dict - handle different checkpoint formats
+if 'model_state_dict' in checkpoint:
+    state_dict = checkpoint['model_state_dict']
+    print("Found 'model_state_dict' in checkpoint")
+elif 'model' in checkpoint:
+    state_dict = checkpoint['model']
+    print("Found 'model' in checkpoint")
+else:
+    # Assume the checkpoint IS the state dict
+    state_dict = checkpoint
+    print("Using checkpoint as state dict")
+
+# Infer config from state dict
 vocab_size = state_dict['transformer.wte.weight'].shape[0]
 n_embd = state_dict['transformer.wte.weight'].shape[1]
 block_size = state_dict['transformer.wpe.weight'].shape[0]
@@ -63,13 +74,20 @@ print(f"Config: vocab_size={vocab_size}, block_size={block_size}, n_layer={n_lay
 
 # Initialize model
 model = GPT(config)
-model.load_state_dict(checkpoint)
+model.load_state_dict(state_dict)
 model.eval()
 
-# Create vocabulary
-vocab_str = "\n !\"&'(),-.0123456789:;?ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-itos = {i: c for i, c in enumerate(vocab_str)}
-stoi = {c: i for i, c in enumerate(vocab_str)}
+# Get vocabulary
+if 'itos' in checkpoint and 'stoi' in checkpoint:
+    itos = checkpoint['itos']
+    stoi = checkpoint['stoi']
+    print("Vocabulary loaded from checkpoint")
+else:
+    # Use default Shakespeare vocabulary
+    print("Using default vocabulary")
+    vocab_str = "\n !\"&'(),-.0123456789:;?ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+    itos = {i: c for i, c in enumerate(vocab_str)}
+    stoi = {c: i for i, c in enumerate(vocab_str)}
 
 # Generate sample
 print("\n" + "="*70)
