@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# PyTorch
+*.pth
+*.pt
+
+# Training outputs
+models/*.pt
+models/*.pth
+vocab/*.pkl
+outputs/*.txt
+
+# Keep directories but ignore contents
+models/*
+!models/.gitkeep
+vocab/*
+!vocab/.gitkeep
+outputs/*
+!outputs/.gitkeep
+
+# Dataset files (users should add their own)
+datasets/*.txt
+!datasets/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+venv/
+env/
+ENV/
