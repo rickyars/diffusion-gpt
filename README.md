@@ -188,6 +188,29 @@ Options:
 - `--verbose`: Show intermediate denoising steps
 - `--seed`: Random seed for reproducibility
 - `--device`: Device to use
+- `--prefix`: Prefix text to condition generation (optional)
+- `--suffix`: Suffix text to condition generation (optional)
+
+#### Conditional Generation (Prompted)
+
+You can now prompt the model with prefix and/or suffix text to guide generation:
+
+```bash
+# Generate text starting with a specific prefix
+python generate.py \
+  --model pretrained_model/model_epoch_25.pth \
+  --prefix "Once upon a time" \
+  --samples 5
+
+# Generate text with both prefix and suffix (fill-in-the-middle)
+python generate.py \
+  --model pretrained_model/model_epoch_25.pth \
+  --prefix "The quick brown fox" \
+  --suffix "the lazy dog." \
+  --samples 3
+```
+
+The model will use discrete diffusion to generate coherent text that starts with your prefix and/or ends with your suffix, filling in the middle content.
 
 ### Configuration
 

@@ -18,6 +18,20 @@ def set_seed(seed: int = 42):
     torch.backends.cudnn.benchmark = False
 
 
+def encode(text: str, stoi: dict) -> list:
+    """
+    Encodes a string to a list of token indices.
+
+    Args:
+        text: Input text string
+        stoi: Dictionary mapping characters to indices
+
+    Returns:
+        List of character indices
+    """
+    return [stoi[ch] for ch in text if ch in stoi]
+
+
 def decode(indices_tensor: torch.Tensor, itos: dict):
     """
     Decodes a 1D tensor of indices to text.
