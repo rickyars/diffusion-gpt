@@ -36,14 +36,13 @@ Update URLs in `index.html`, then upload `index.html`.
 
 ## Files
 
-- **`index.html`** - Main demo with ONNX.js (auto-play, continuous mode)
+- **`index.html`** - Main demo with ONNX.js (128 steps, auto-play, continuous mode)
 - **`diffusion_demo.html`** - Simple JavaScript demo (no model, pure JS simulation)
-- **`export_to_onnx.py`** - Converts PyTorch models to ONNX
+- **`export_to_onnx.py`** - Converts PyTorch models to ONNX (with vocab loading fix)
+- **`test_pytorch_generation.py`** - Quick test to verify PyTorch model generates coherent text
 - **`test_server.py`** - Local development server with CORS headers
 - **`debug.html`** - Interactive debugging tool with extensive logging
-- **`debug_python.py`** - Python reference script for comparison
 - **`quick_test.html`** - Fast model diagnostic (check if model works)
-- **`DEBUGGING_GUIDE.md`** - Comprehensive debugging guide
 
 ## Documentation
 
@@ -97,33 +96,35 @@ python test_server.py
 4. Upload `index.html`
 5. Share the URL!
 
-## Debugging
+## Troubleshooting
 
-If the web inference produces garbage output, use the debugging tools:
+### Gibberish Output
 
-### Quick Debug
+If the web inference produces gibberish, the issue is usually vocabulary mismatch:
 
-```bash
-cd web
-# Generate reference data from Python
-python debug_python.py
+1. **Create vocabulary file** (if missing):
+   ```bash
+   python create_vocab.py --dataset datasets/shakespeare.txt --output vocab/shakespeare_vocab.pkl
+   ```
 
-# Start local server
-python test_server.py
+2. **Re-export ONNX** with correct vocabulary:
+   ```bash
+   cd web
+   python export_to_onnx.py --checkpoint ../models/shakespeare.pt
+   ```
+   Should show: `✓ Vocabulary loaded successfully from .pkl file`
 
-# Open http://localhost:8000/debug.html in browser
-# Click "Load Model" → "Test Single Inference"
-# Compare outputs with debug_*.json files
-```
+3. **Test the model**:
+   - Quick test: Open http://localhost:8000/quick_test.html
+     - Expected: Std Dev > 1.0 (if < 0.1, vocabulary is wrong)
+   - Full test: Open http://localhost:8000/index.html
+     - Should see coherent Shakespeare-style text after 128 steps
 
-### Full Guide
+### Common Issues
 
-See **[DEBUGGING_GUIDE.md](DEBUGGING_GUIDE.md)** for comprehensive debugging instructions including:
-- Step-by-step debugging process
-- Common issues and solutions
-- How to compare Python vs Web outputs
-- What to look for at each stage
-- How to identify the root cause
+- **Low quality output**: Increase steps in `index.html` config (already set to 128)
+- **Browser cache**: Hard refresh (Ctrl+Shift+R) after re-exporting ONNX
+- **Vocabulary mismatch**: Ensure vocab file matches the dataset used during training
 
 ## Notes
 
