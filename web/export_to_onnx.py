@@ -7,6 +7,7 @@ USAGE:
 
 Options:
     --checkpoint PATH    Path to model checkpoint (default: ../pretrained_model/model_epoch_25.pth)
+    --vocab PATH         Path to vocabulary .pkl file (default: auto-detect from model name)
     --output DIR         Output directory for ONNX files (default: ./demo)
     --opset VERSION      ONNX opset version (default: 15)
 
@@ -20,6 +21,7 @@ import sys
 import json
 import pickle
 import argparse
+import yaml
 
 # Add parent directory to path to import model
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -29,6 +31,7 @@ from model import GPT, GPTConfig
 
 def export_model_to_onnx(
     checkpoint_path: str = '../pretrained_model/model_epoch_25.pth',
+    vocab_path: str = None,
     output_dir: str = './demo',
     opset_version: int = 15
 ):
@@ -37,6 +40,7 @@ def export_model_to_onnx(
 
     Args:
         checkpoint_path: Path to PyTorch checkpoint
+        vocab_path: Path to vocabulary .pkl file (auto-detects if None)
         output_dir: Directory to save ONNX model and metadata
         opset_version: ONNX opset version
     """
@@ -167,20 +171,64 @@ def export_model_to_onnx(
 
     print(f"ONNX model exported successfully!")
 
-    # Extract and save vocabulary
-    if 'itos' in checkpoint and 'stoi' in checkpoint:
-        print("\nExtracting vocabulary from checkpoint...")
-        vocab_data = {
-            'itos': checkpoint['itos'],
-            'stoi': checkpoint['stoi']
-        }
-    else:
-        print("\nWarning: Vocabulary not found in checkpoint, using default Shakespeare vocab")
-        vocab_str = "\n !\"&'(),-.0123456789:;?ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-        vocab_data = {
-            'itos': {i: c for i, c in enumerate(vocab_str)},
-            'stoi': {c: i for i, c in enumerate(vocab_str)}
-        }
+    # Load vocabulary - use same logic as generate.py
+    print("\nLoading vocabulary...")
+
+    # If vocab_path not specified, try to infer it
+    if vocab_path is None:
+        # Load config to get vocab_dir
+        config_path = os.path.join(os.path.dirname(__file__), '..', 'config.yaml')
+        if os.path.exists(config_path):
+            with open(config_path, 'r') as f:
+                config = yaml.safe_load(f)
+                vocab_dir = config['paths']['vocab_dir']
+        else:
+            vocab_dir = 'vocab'  # Default
+
+        # Infer vocab path from model name (same as generate.py)
+        model_name = os.path.splitext(os.path.basename(checkpoint_path))[0]
+        # Remove _epoch_N suffix if present
+        if '_epoch_' in model_name:
+            model_name = model_name.split('_epoch_')[0]
+
+        # Construct vocab path relative to project root
+        project_root = os.path.dirname(os.path.dirname(__file__))
+        vocab_path = os.path.join(project_root, vocab_dir, f"{model_name}_vocab.pkl")
+        print(f"Auto-detected vocab path: {vocab_path}")
+
+    # Try to load vocabulary from .pkl file first (preferred)
+    vocab_data = None
+    if vocab_path and os.path.exists(vocab_path):
+        print(f"Loading vocabulary from: {vocab_path}")
+        try:
+            with open(vocab_path, 'rb') as f:
+                vocab_meta = pickle.load(f)
+                vocab_data = {
+                    'itos': vocab_meta['itos'],
+                    'stoi': vocab_meta['stoi']
+                }
+            print("✓ Vocabulary loaded successfully from .pkl file")
+        except Exception as e:
+            print(f"⚠️  Failed to load vocabulary from {vocab_path}: {e}")
+
+    # Fallback: try to extract from checkpoint
+    if vocab_data is None:
+        if 'itos' in checkpoint and 'stoi' in checkpoint:
+            print("Extracting vocabulary from checkpoint...")
+            vocab_data = {
+                'itos': checkpoint['itos'],
+                'stoi': checkpoint['stoi']
+            }
+            print("✓ Vocabulary loaded from checkpoint")
+        else:
+            print("\n❌ ERROR: Vocabulary not found!")
+            print(f"  - Vocabulary file not found: {vocab_path}")
+            print(f"  - Checkpoint does not contain 'itos'/'stoi' keys")
+            print("\nPlease either:")
+            print(f"  1. Create vocabulary file: {vocab_path}")
+            print(f"  2. Specify vocabulary with: --vocab path/to/vocab.pkl")
+            print(f"  3. Ensure the checkpoint was trained with train.py")
+            sys.exit(1)
 
     # Save as JSON for JavaScript
     vocab_json_path = os.path.join(output_dir, 'vocab.json')
@@ -229,15 +277,18 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Export PyTorch model to ONNX')
     parser.add_argument('--checkpoint', type=str, default='../pretrained_model/model_epoch_25.pth',
                         help='Path to model checkpoint')
+    parser.add_argument('--vocab', type=str, default=None,
+                        help='Path to vocabulary .pkl file (default: auto-detect from model name)')
     parser.add_argument('--output', type=str, default='./demo',
                         help='Output directory for ONNX files')
     parser.add_argument('--opset', type=int, default=15,
                         help='ONNX opset version')
-    
+
     args = parser.parse_args()
-    
+
     export_model_to_onnx(
         checkpoint_path=args.checkpoint,
+        vocab_path=args.vocab,
         output_dir=args.output,
         opset_version=args.opset
     )
