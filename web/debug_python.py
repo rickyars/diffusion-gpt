@@ -9,7 +9,7 @@ This script:
 
 USAGE:
     cd web
-    python debug_python.py --model ../models/shakespear.pt
+    python debug_python.py --model ../models/shakespeare.pt
 """
 import sys
 import os
@@ -50,7 +50,7 @@ def test_pytorch_inference(checkpoint_path='../pretrained_model/model_epoch_25.p
     # Load checkpoint
     if not os.path.exists(checkpoint_path):
         print(f"\n❌ ERROR: Model checkpoint not found: {checkpoint_path}")
-        print("\nUsage: python debug_python.py --model ../models/shakespear.pt")
+        print("\nUsage: python debug_python.py --model ../models/shakespeare.pt")
         return None
 
     print(f"\nLoading checkpoint: {checkpoint_path}")
@@ -464,7 +464,7 @@ def main():
     # Parse arguments
     parser = argparse.ArgumentParser(description='Debug PyTorch and ONNX inference')
     parser.add_argument('--model', type=str, default='../pretrained_model/model_epoch_25.pth',
-                        help='Path to model checkpoint (e.g., ../models/shakespear.pt)')
+                        help='Path to model checkpoint (e.g., ../models/shakespeare.pt)')
     args = parser.parse_args()
 
     print_section("DISCRETE DIFFUSION DEBUG SUITE")

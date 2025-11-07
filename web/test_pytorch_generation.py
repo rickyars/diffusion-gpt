@@ -3,7 +3,7 @@ Quick test to verify PyTorch model generates coherent text.
 This will tell us if the checkpoint is actually trained.
 
 USAGE:
-    python test_pytorch_generation.py --model ../models/shakespear.pt
+    python test_pytorch_generation.py --model ../models/shakespeare.pt
 """
 import sys
 import os
@@ -17,7 +17,7 @@ from utils import GeometricNoise, staggered_score, transition, sample_categorica
 # Parse arguments
 parser = argparse.ArgumentParser(description='Test PyTorch model generation')
 parser.add_argument('--model', type=str, default='../pretrained_model/model_epoch_25.pth',
-                    help='Path to model checkpoint (e.g., ../models/shakespear.pt)')
+                    help='Path to model checkpoint (e.g., ../models/shakespeare.pt)')
 args = parser.parse_args()
 
 print("="*70)
@@ -28,7 +28,7 @@ print("="*70)
 checkpoint_path = args.model
 if not os.path.exists(checkpoint_path):
     print(f"\n❌ ERROR: Model checkpoint not found: {checkpoint_path}")
-    print("\nUsage: python test_pytorch_generation.py --model ../models/shakespear.pt")
+    print("\nUsage: python test_pytorch_generation.py --model ../models/shakespeare.pt")
     sys.exit(1)
 
 print(f"\nLoading checkpoint: {checkpoint_path}")
