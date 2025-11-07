@@ -50,89 +50,29 @@ datasets:
     enabled: true
     description: "Shakespeare's complete works"
 
-  # Example 2: GitHub commits
+  # Example 2: Reddit
   github_commits:
-    path: datasets/github_commits.txt
-    enabled: false
-    description: "Terse technical commit messages"
+    path: datasets/reddit.txt
+    enabled: true
+    description: "Anonymized comments / scores from 40 subreddits, in uniform number (25000 each)"
 
-  # Example 3: Amazon reviews
+  # Example 3: Stack Overflow
   amazon_reviews:
-    path: datasets/amazon_reviews.txt
-    enabled: false
-    description: "Customer product reviews"
+    path: datasets/stack_overflow.txt
+    enabled: true
+    description: "Text from 10% of Stack Overflow questions and answers on programming topics"
 
-  # Example 4: Goodreads reviews
-  goodreads_reviews:
-    path: datasets/goodreads_reviews.txt
-    enabled: false
-    description: "Book reviews from Goodreads"
+  # Example 4: Amazon
+  amazon_reviews:
+    path: datasets/amazon.txt
+    enabled: true
+    description: "34,686,770 Amazon reviews from 6,643,669 users on 2,441,053 products"
 
-  # Example 5: Yelp reviews
-  yelp_reviews:
-    path: datasets/yelp_reviews.txt
-    enabled: false
-    description: "Restaurant and business reviews"
-
-  # Example 6: Hacker News posts
-  hacker_news:
-    path: datasets/hacker_news_posts.txt
-    enabled: false
-    description: "Tech discussion posts"
-
-  # Example 7: Reddit comments
-  reddit_comments:
-    path: datasets/reddit_comments.txt
-    enabled: false
-    description: "Casual social media comments"
-
-  # Example 8: YouTube comments
-  youtube_comments:
-    path: datasets/youtube_comments.txt
-    enabled: false
-    description: "Video comments"
-
-  # Example 9: arXiv abstracts
-  arxiv_abstracts:
-    path: datasets/arxiv_abstracts.txt
-    enabled: false
-    description: "Formal academic paper abstracts"
-
-  # Example 10: Stack Overflow questions
-  stackoverflow_questions:
-    path: datasets/stackoverflow_questions.txt
-    enabled: false
-    description: "Technical programming questions"
-
-  # Example 11: Stack Overflow answers
-  stackoverflow_answers:
-    path: datasets/stackoverflow_answers.txt
-    enabled: false
-    description: "Technical programming answers"
-
-  # Example 12: Twitter/X posts
-  twitter_posts:
-    path: datasets/twitter_posts.txt
-    enabled: false
-    description: "Short social media posts"
-
-  # Example 13: News articles
-  news_articles:
-    path: datasets/news_articles.txt
-    enabled: false
-    description: "Journalistic news text"
-
-  # Example 14: Blog posts
-  blog_posts:
-    path: datasets/blog_posts.txt
-    enabled: false
-    description: "Personal blog writing"
-
-  # Example 15: Product descriptions
-  product_descriptions:
-    path: datasets/product_descriptions.txt
-    enabled: false
-    description: "E-commerce product descriptions"
+  # Example 5: Yelp
+  amazon_reviews:
+    path: datasets/yelp.txt
+    enabled: true
+    description: "598,000 review from yelp"
 
 # Output directories
 paths:
