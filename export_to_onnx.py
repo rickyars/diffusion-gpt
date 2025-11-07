@@ -30,7 +30,7 @@ def export_model_to_onnx(
         opset_version: ONNX opset version
     """
     print(f"Loading checkpoint from: {checkpoint_path}")
-    checkpoint = torch.load(checkpoint_path, map_location='cpu')
+    checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
 
     # Extract model config
     if 'config' in checkpoint:

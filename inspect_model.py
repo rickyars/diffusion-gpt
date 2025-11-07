@@ -1,7 +1,7 @@
 """Quick script to inspect the pretrained model checkpoint."""
 import torch
 
-checkpoint = torch.load('pretrained_model/model_epoch_25.pth', map_location='cpu')
+checkpoint = torch.load('pretrained_model/model_epoch_25.pth', map_location='cpu', weights_only=False)
 print("Checkpoint keys:")
 for key in checkpoint.keys():
     print(f"  {key}")
