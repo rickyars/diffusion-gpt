@@ -4,6 +4,7 @@
 torch>=2.0.0
 numpy>=1.24.0,<2.0.0  # Pin to 1.x for PyTorch compatibility
 pyyaml>=6.0
+Pillow>=10.0.0  # For generating animated GIFs
 
 # Optional but recommended for better performance
 # Install with: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
