@@ -186,6 +186,7 @@
         .text-output {
             white-space: pre-wrap;
             word-wrap: break-word;
+            padding-top: 10px;
         }
 
         .char {
@@ -413,7 +414,7 @@
 
         // Configuration
         const config = {
-            steps: 64,
+            steps: 128,  // More steps = better quality text
             sigmaMin: 0.0001,
             sigmaMax: 20.0,
             delayMs: 100  // delay between denoising steps for visualization (faster!)

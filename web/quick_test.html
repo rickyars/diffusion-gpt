@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Quick Model Test</title>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.16.3/dist/ort.min.js"></script>
+</head>
+<body>
+    <h1>Quick Model Diagnostic</h1>
+    <p>Loading model and testing...</p>
+    <div id="output" style="font-family: monospace; white-space: pre;"></div>
+
+    <script>
+        async function test() {
+            const output = document.getElementById('output');
+
+            try {
+                output.textContent += 'Loading model files...\n';
+
+                const metadata = await (await fetch('./demo/metadata.json')).json();
+                const vocab = await (await fetch('./demo/vocab.json')).json();
+                const session = await ort.InferenceSession.create('./demo/model.onnx');
+
+                output.textContent += `Model loaded!\n`;
+                output.textContent += `Vocab size: ${metadata.vocab_size}\n`;
+                output.textContent += `Block size: ${metadata.block_size}\n\n`;
+
+                // Create test input (all zeros)
+                const seqLen = metadata.block_size;
+                const inputIds = new Array(seqLen).fill(0);
+                const sigma = 10.0;
+
+                output.textContent += `Testing with all-zero input and sigma=${sigma}\n\n`;
+
+                // Run inference
+                const inputTensor = new ort.Tensor('int64', BigInt64Array.from(inputIds.map(x => BigInt(x))), [1, seqLen]);
+                const sigmaTensor = new ort.Tensor('float32', new Float32Array([sigma]), [1]);
+
+                const results = await session.run({
+                    'input_ids': inputTensor,
+                    'sigma': sigmaTensor
+                });
+
+                const logits = Array.from(results.logits.data);
+                const vocabSize = metadata.vocab_size;
+
+                // Get first position logits
+                const firstPosLogits = logits.slice(0, vocabSize);
+
+                output.textContent += 'First position logits (first 10):\n';
+                output.textContent += firstPosLogits.slice(0, 10).map((x, i) => `  [${i}] ${x.toFixed(4)}`).join('\n');
+                output.textContent += '\n\n';
+
+                const min = Math.min(...firstPosLogits);
+                const max = Math.max(...firstPosLogits);
+                const mean = firstPosLogits.reduce((a, b) => a + b, 0) / firstPosLogits.length;
+                const variance = firstPosLogits.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / firstPosLogits.length;
+                const std = Math.sqrt(variance);
+
+                output.textContent += `Statistics:\n`;
+                output.textContent += `  Min: ${min.toFixed(4)}\n`;
+                output.textContent += `  Max: ${max.toFixed(4)}\n`;
+                output.textContent += `  Mean: ${mean.toFixed(4)}\n`;
+                output.textContent += `  Std Dev: ${std.toFixed(4)}\n`;
+                output.textContent += `  Range: ${(max - min).toFixed(4)}\n\n`;
+
+                // Diagnose
+                output.textContent += '=== DIAGNOSIS ===\n';
+                if (std < 0.1) {
+                    output.textContent += '❌ PROBLEM: Logits are nearly uniform (std < 0.1)\n';
+                    output.textContent += '   This means the model is not producing meaningful predictions.\n';
+                    output.textContent += '   The model may not be trained properly or ONNX export failed.\n';
+                } else if (std < 1.0) {
+                    output.textContent += '⚠️  WARNING: Logits have low variance (std < 1.0)\n';
+                    output.textContent += '   The model predictions are very weak.\n';
+                } else {
+                    output.textContent += '✅ GOOD: Logits show meaningful variation (std >= 1.0)\n';
+                    output.textContent += '   The model is producing differentiated predictions.\n';
+                    output.textContent += '   The problem may be elsewhere in the pipeline.\n';
+                }
+
+                // Convert to probabilities to see distribution
+                const scores = firstPosLogits.map(x => Math.exp(x));
+                const scoreSum = scores.reduce((a, b) => a + b, 0);
+                const probs = scores.map(s => s / scoreSum);
+
+                output.textContent += '\n\nTop 10 predicted tokens (by probability):\n';
+                const sortedIndices = probs.map((p, i) => [i, p]).sort((a, b) => b[1] - a[1]);
+                for (let i = 0; i < 10; i++) {
+                    const [idx, prob] = sortedIndices[i];
+                    const char = vocab.itos[idx.toString()];
+                    const displayChar = char === '\n' ? '\\n' : char === ' ' ? 'SPACE' : char;
+                    output.textContent += `  [${idx}] '${displayChar}': ${(prob * 100).toFixed(2)}%\n`;
+                }
+
+            } catch (error) {
+                output.textContent += `\n❌ Error: ${error.message}\n`;
+                console.error(error);
+            }
+        }
+
+        test();
+    </script>
+</body>
+</html>
