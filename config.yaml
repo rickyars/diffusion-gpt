@@ -49,18 +49,21 @@ datasets:
     path: datasets/shakespeare.txt
     enabled: true
     description: "Shakespeare's complete works"
+    # max_chars: 1000000  # Optional: limit to first 1M characters
 
   # Example 2: GitHub commits
   github_commits:
     path: datasets/github_commits.txt
     enabled: false
     description: "Terse technical commit messages"
+    # max_chars: 5000000  # Optional: limit dataset size
 
-  # Example 3: Amazon reviews
+  # Example 3: Amazon reviews (large dataset example)
   amazon_reviews:
     path: datasets/amazon_reviews.txt
     enabled: false
     description: "Customer product reviews"
+    max_chars: 10000000  # Limit to ~10MB of text for faster training
 
   # Example 4: Goodreads reviews
   goodreads_reviews:

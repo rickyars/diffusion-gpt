@@ -97,7 +97,10 @@ datasets:
     path: datasets/shakespeare.txt
     enabled: true  # Set to true
     description: "Shakespeare's complete works"
+    # max_chars: 1000000  # Optional: limit to 1M chars for faster training
 ```
+
+**Tip**: For large datasets, add `max_chars` to limit training time. See [docs/DATASET_SIZE_LIMITING.md](docs/DATASET_SIZE_LIMITING.md)
 
 ### 3. Train a Model
 
