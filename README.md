@@ -369,6 +369,7 @@ python train.py --dataset dataset_name
 Detailed guides have been organized in the `docs/` folder:
 
 - **[PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md)** - 🌟 **START HERE!** Explains what every file does
+- **[docs/CSV_DATASET_GUIDE.md](docs/CSV_DATASET_GUIDE.md)** - Converting CSV files to training format
 - **[docs/WEB_DEMO_README.md](docs/WEB_DEMO_README.md)** - Complete web demo documentation
 - **[docs/QUICK_START_WEB_DEMO.md](docs/QUICK_START_WEB_DEMO.md)** - Fast setup for browser inference
 - **[docs/ANIMATION_GUIDE.md](docs/ANIMATION_GUIDE.md)** - Creating animated GIFs
