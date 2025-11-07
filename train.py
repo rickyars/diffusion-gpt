@@ -132,6 +132,7 @@ def train_model(
     config: dict,
     device: torch.device,
     resume_from: Optional[str] = None,
+    dataset_config: Optional[dict] = None,
 ):
     """
     Train a discrete diffusion model on a single dataset.
@@ -142,6 +143,7 @@ def train_model(
         config: Configuration dictionary
         device: torch device
         resume_from: Optional path to checkpoint to resume from
+        dataset_config: Optional dataset-specific configuration (for max_chars, etc.)
     """
     print(f"\n{'='*80}")
     print(f"Training model on: {dataset_name}")
@@ -176,6 +178,13 @@ def train_model(
         print(f"{'='*80}\n")
         return  # Skip this dataset
 
+    # Get max_chars limit from dataset config (optional)
+    max_chars = None
+    if dataset_config:
+        max_chars = dataset_config.get('max_chars', None)
+    if max_chars:
+        print(f"Dataset size limit: {max_chars:,} characters")
+
     # Create dataloaders
     print("Loading training data...")
     train_loader, vocab_size, itos, stoi = get_data_loader(
@@ -187,6 +196,7 @@ def train_model(
         vocab_path=vocab_path if os.path.exists(vocab_path) else None,
         shuffle=True,
         num_workers=2,  # Parallel data loading (adjust based on CPU cores)
+        max_chars=max_chars,
     )
 
     print("Loading validation data...")
@@ -199,6 +209,7 @@ def train_model(
         vocab_path=vocab_path,
         shuffle=False,
         num_workers=2,
+        max_chars=max_chars,
     )
 
     # Save vocabulary for later use
@@ -442,7 +453,7 @@ def main():
             print(f"Please place your .txt file at: {dataset_path}")
             sys.exit(1)
 
-        train_model(args.dataset, dataset_path, config, device, args.resume)
+        train_model(args.dataset, dataset_path, config, device, args.resume, dataset_config)
 
     elif args.all:
         # Train on all enabled datasets
@@ -463,7 +474,7 @@ def main():
                 print(f"Warning: Skipping {dataset_name} - file not found: {dataset_path}")
                 continue
 
-            train_model(dataset_name, dataset_path, config, device)
+            train_model(dataset_name, dataset_path, config, device, dataset_config=dataset_config)
 
     else:
         print("Error: Please specify --dataset <name> or --all")

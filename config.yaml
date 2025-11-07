@@ -49,30 +49,35 @@ datasets:
     path: datasets/shakespeare.txt
     enabled: true
     description: "Shakespeare's complete works"
+    # max_chars: 1000000  # Optional: limit to first 1M characters
 
   # Example 2: Reddit
   github_commits:
     path: datasets/reddit.txt
     enabled: true
     description: "Anonymized comments / scores from 40 subreddits, in uniform number (25000 each)"
+    max_chars: 10000000  # Optional: limit dataset size
 
   # Example 3: Stack Overflow
   amazon_reviews:
     path: datasets/stack_overflow.txt
     enabled: true
     description: "Text from 10% of Stack Overflow questions and answers on programming topics"
+    max_chars: 10000000  # Optional: limit dataset size
 
   # Example 4: Amazon
   amazon_reviews:
     path: datasets/amazon.txt
     enabled: true
     description: "34,686,770 Amazon reviews from 6,643,669 users on 2,441,053 products"
+    max_chars: 10000000  # Optional: limit dataset size
 
   # Example 5: Yelp
   amazon_reviews:
     path: datasets/yelp.txt
     enabled: true
     description: "598,000 review from yelp"
+    max_chars: 10000000  # Optional: limit dataset size
 
 # Output directories
 paths:
