@@ -621,12 +621,23 @@
         // Perform one denoising step
         async function denoisingStep() {
             const eps = 1e-5;
-            const t = 1 - (currentStep / config.steps) * (1 - eps);
-            const tNext = 1 - ((currentStep + 1) / config.steps) * (1 - eps);
+            const totalSteps = config.steps;
+
+            // Calculate timestep (should go from 1 to eps over steps+1 iterations)
+            const t = 1 - (currentStep / totalSteps) * (1 - eps);
 
             const currSigma = geometricNoise(t);
-            const nextSigma = currentStep < config.steps - 1 ? geometricNoise(tNext) : 0;
-            const deltaSigma = currSigma - nextSigma;
+
+            // Calculate delta_sigma
+            let deltaSigma;
+            if (currentStep < totalSteps) {
+                const tNext = 1 - ((currentStep + 1) / totalSteps) * (1 - eps);
+                const nextSigma = geometricNoise(tNext);
+                deltaSigma = currSigma - nextSigma;
+            } else {
+                // Last step: denoise completely to sigma = 0
+                deltaSigma = currSigma;
+            }
 
             const prevSequence = [...currentSequence];
 
@@ -659,7 +670,8 @@
             currentStep++;
             updateDisplay(prevSequence);
 
-            return currentStep < config.steps;
+            // Continue until we've done steps+1 iterations (0 to steps inclusive)
+            return currentStep <= totalSteps;
         }
 
         // Decode sequence to text
