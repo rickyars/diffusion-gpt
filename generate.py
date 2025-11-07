@@ -166,7 +166,7 @@ def main():
         sys.exit(1)
 
     print(f"Loading model from: {args.model}")
-    checkpoint = torch.load(args.model, map_location=device)
+    checkpoint = torch.load(args.model, map_location=device, weights_only=False)
 
     # Extract model config
     if 'config' in checkpoint:

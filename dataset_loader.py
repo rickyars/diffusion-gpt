@@ -43,6 +43,7 @@ class CharacterDataset(data.Dataset):
         if vocab_path and os.path.exists(vocab_path):
             print(f"Loading vocabulary from {vocab_path}")
             with open(vocab_path, 'rb') as f:
+                # Note: weights_only not available for pickle.load, this is safe for our vocab files
                 meta = pickle.load(f)
                 self.stoi = meta['stoi']
                 self.itos = meta['itos']
