@@ -15,6 +15,7 @@ from model import GPT, GPTConfig
 from utils import (
     GeometricNoise,
     decode,
+    encode,
     sample_categorical,
     set_seed,
     staggered_score,
@@ -30,17 +31,67 @@ def print_wrapped(text: str, width: int = 80):
     print(final_text)
 
 
+def create_projection_function(
+    prefix_ids: list,
+    suffix_ids: list,
+    context_length: int,
+    device: torch.device
+):
+    """
+    Creates a projection function that constrains specific token positions.
+
+    Args:
+        prefix_ids: List of token IDs for the prefix
+        suffix_ids: List of token IDs for the suffix
+        context_length: Total sequence length
+        device: torch device
+
+    Returns:
+        A function that projects tokens to satisfy prefix/suffix constraints
+    """
+    if not prefix_ids and not suffix_ids:
+        # No constraints, return identity function
+        return None
+
+    # Create mask and fixed tokens
+    mask = torch.zeros(context_length, dtype=torch.bool, device=device)
+    fixed_tokens = torch.zeros(context_length, dtype=torch.long, device=device)
+
+    # Set prefix positions
+    if prefix_ids:
+        prefix_len = len(prefix_ids)
+        mask[:prefix_len] = True
+        fixed_tokens[:prefix_len] = torch.tensor(prefix_ids, dtype=torch.long, device=device)
+
+    # Set suffix positions
+    if suffix_ids:
+        suffix_len = len(suffix_ids)
+        mask[-suffix_len:] = True
+        fixed_tokens[-suffix_len:] = torch.tensor(suffix_ids, dtype=torch.long, device=device)
+
+    def proj_fun(x: torch.Tensor) -> torch.Tensor:
+        """Project x to satisfy constraints."""
+        x_proj = x.clone()
+        x_proj[:, mask] = fixed_tokens[mask]
+        return x_proj
+
+    return proj_fun
+
+
 def generate_samples(
     model: GPT,
     noise: GeometricNoise,
     vocab_size: int,
     itos: dict,
+    stoi: dict,
     num_samples: int = 10,
     context_length: int = 256,
     steps: int = 128,
     device: torch.device = torch.device('cpu'),
     eps: float = 1e-5,
     verbose: bool = False,
+    prefix: str = None,
+    suffix: str = None,
 ):
     """
     Generate text samples from a trained discrete diffusion model.
@@ -50,18 +101,44 @@ def generate_samples(
         noise: GeometricNoise instance
         vocab_size: Vocabulary size
         itos: Index to string mapping
+        stoi: String to index mapping
         num_samples: Number of samples to generate
         context_length: Length of generated sequences
         steps: Number of denoising steps
         device: torch device
         eps: Small epsilon for numerical stability
         verbose: Print intermediate denoising steps
+        prefix: Optional prefix text to condition generation
+        suffix: Optional suffix text to condition generation
 
     Returns:
         List of generated text samples
     """
     model.eval()
     samples = []
+
+    # Encode prefix and suffix if provided
+    prefix_ids = encode(prefix, stoi) if prefix else []
+    suffix_ids = encode(suffix, stoi) if suffix else []
+
+    # Validate that prefix + suffix don't exceed context length
+    if len(prefix_ids) + len(suffix_ids) > context_length:
+        raise ValueError(
+            f"Prefix ({len(prefix_ids)} chars) + suffix ({len(suffix_ids)} chars) "
+            f"exceed context length ({context_length})"
+        )
+
+    # Create projection function for conditional generation
+    proj_fun = create_projection_function(prefix_ids, suffix_ids, context_length, device)
+
+    # Print conditioning info
+    if prefix or suffix:
+        print("\nConditional generation:")
+        if prefix:
+            print(f"  Prefix: \"{prefix}\" ({len(prefix_ids)} tokens)")
+        if suffix:
+            print(f"  Suffix: \"{suffix}\" ({len(suffix_ids)} tokens)")
+        print(f"  Free tokens: {context_length - len(prefix_ids) - len(suffix_ids)}")
 
     step_size = (1 - eps) / steps
     timesteps = torch.linspace(1, eps, steps + 1, device=device)
@@ -93,6 +170,10 @@ def generate_samples(
                     stag_score = staggered_score(score, delta_sigma)
                     probs = stag_score * transition(x, delta_sigma, vocab_size)
                     x = sample_categorical(probs)
+
+                    # Apply projection to enforce prefix/suffix constraints
+                    if proj_fun is not None:
+                        x = proj_fun(x)
                 else:
                     # Last denoising step
                     delta_sigma = curr_sigma_bar
@@ -103,6 +184,10 @@ def generate_samples(
                     stag_score = staggered_score(score, delta_sigma)
                     probs = stag_score * transition(x, delta_sigma, vocab_size)
                     x = sample_categorical(probs)
+
+                    # Apply projection to enforce prefix/suffix constraints
+                    if proj_fun is not None:
+                        x = proj_fun(x)
 
                 if verbose and (i % (steps // 5) == 0 or i == steps):
                     print(f"\nStep {i}/{steps}:")
@@ -139,6 +224,10 @@ def main():
                        help='Device to use (cuda/cpu). Overrides config.')
     parser.add_argument('--verbose', action='store_true',
                        help='Print intermediate denoising steps')
+    parser.add_argument('--prefix', type=str, default=None,
+                       help='Prefix text to condition generation (optional)')
+    parser.add_argument('--suffix', type=str, default=None,
+                       help='Suffix text to condition generation (optional)')
 
     args = parser.parse_args()
 
@@ -196,27 +285,33 @@ def main():
 
     print(f"Model parameters: {model.get_num_params() / 1e6:.2f}M")
 
-    # Load vocabulary
-    if args.vocab:
-        vocab_path = args.vocab
+    # Load vocabulary - try checkpoint first, then external file
+    if 'itos' in checkpoint and 'stoi' in checkpoint:
+        print("Loading vocabulary from checkpoint...")
+        itos = checkpoint['itos']
+        stoi = checkpoint['stoi']
     else:
-        # Infer vocab path from model name
-        model_name = os.path.splitext(os.path.basename(args.model))[0]
-        # Remove _epoch_N suffix if present
-        if '_epoch_' in model_name:
-            model_name = model_name.split('_epoch_')[0]
-        vocab_path = os.path.join(config['paths']['vocab_dir'], f"{model_name}_vocab.pkl")
+        # Load from external vocab file
+        if args.vocab:
+            vocab_path = args.vocab
+        else:
+            # Infer vocab path from model name
+            model_name = os.path.splitext(os.path.basename(args.model))[0]
+            # Remove _epoch_N suffix if present
+            if '_epoch_' in model_name:
+                model_name = model_name.split('_epoch_')[0]
+            vocab_path = os.path.join(config['paths']['vocab_dir'], f"{model_name}_vocab.pkl")
 
-    if not os.path.exists(vocab_path):
-        print(f"Error: Vocabulary file not found: {vocab_path}")
-        print("Please specify vocabulary file with --vocab")
-        sys.exit(1)
+        if not os.path.exists(vocab_path):
+            print(f"Error: Vocabulary file not found: {vocab_path}")
+            print("Please specify vocabulary file with --vocab")
+            sys.exit(1)
 
-    print(f"Loading vocabulary from: {vocab_path}")
-    with open(vocab_path, 'rb') as f:
-        vocab_meta = pickle.load(f)
-        itos = vocab_meta['itos']
-        stoi = vocab_meta['stoi']
+        print(f"Loading vocabulary from: {vocab_path}")
+        with open(vocab_path, 'rb') as f:
+            vocab_meta = pickle.load(f)
+            itos = vocab_meta['itos']
+            stoi = vocab_meta['stoi']
 
     # Initialize noise schedule
     noise = GeometricNoise(
@@ -238,11 +333,14 @@ def main():
         noise=noise,
         vocab_size=vocab_size,
         itos=itos,
+        stoi=stoi,
         num_samples=num_samples,
         context_length=context_length,
         steps=steps,
         device=device,
         verbose=args.verbose,
+        prefix=args.prefix,
+        suffix=args.suffix,
     )
 
     # Save to file if specified
