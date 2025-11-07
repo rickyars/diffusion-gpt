@@ -40,6 +40,9 @@ Update URLs in `index.html`, then upload `index.html`.
 - **`diffusion_demo.html`** - Simple JavaScript demo (no model, pure JS simulation)
 - **`export_to_onnx.py`** - Converts PyTorch models to ONNX
 - **`test_server.py`** - Local development server with CORS headers
+- **`debug.html`** - Interactive debugging tool with extensive logging
+- **`debug_python.py`** - Python reference script for comparison
+- **`DEBUGGING_GUIDE.md`** - Comprehensive debugging guide
 
 ## Documentation
 
@@ -92,6 +95,34 @@ python test_server.py
 3. Edit `index.html` and update the model/vocab/metadata URLs
 4. Upload `index.html`
 5. Share the URL!
+
+## Debugging
+
+If the web inference produces garbage output, use the debugging tools:
+
+### Quick Debug
+
+```bash
+cd web
+# Generate reference data from Python
+python debug_python.py
+
+# Start local server
+python test_server.py
+
+# Open http://localhost:8000/debug.html in browser
+# Click "Load Model" → "Test Single Inference"
+# Compare outputs with debug_*.json files
+```
+
+### Full Guide
+
+See **[DEBUGGING_GUIDE.md](DEBUGGING_GUIDE.md)** for comprehensive debugging instructions including:
+- Step-by-step debugging process
+- Common issues and solutions
+- How to compare Python vs Web outputs
+- What to look for at each stage
+- How to identify the root cause
 
 ## Notes
 
