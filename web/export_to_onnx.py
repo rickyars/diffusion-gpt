@@ -163,4 +163,3 @@ if __name__ == '__main__':
         output_dir=args.output,
         opset_version=args.opset
     )
-    export_model_to_onnx()
