@@ -79,6 +79,13 @@ datasets:
     description: "598,000 review from yelp"
     max_chars: 1000000  # Optional: limit dataset size
 
+  # Example 6: arxiv
+  amazon_reviews:
+    path: datasets/arxiv_abstracts.txt
+    enabled: true
+    description: "arXiv dataset and metadata of 1.7M+ scholarly papers across STEM"
+    max_chars: 1000000  # Optional: limit dataset size
+
 # Output directories
 paths:
   datasets_dir: datasets
