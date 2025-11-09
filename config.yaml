@@ -59,7 +59,7 @@ datasets:
     max_chars: 1000000  # Optional: limit dataset size
 
   # Example 3: Stack Overflow
-  amazon_reviews:
+  stack_overflow:
     path: datasets/stack_overflow.txt
     enabled: true
     description: "Text from 10% of Stack Overflow questions and answers on programming topics"
@@ -73,14 +73,14 @@ datasets:
     max_chars: 1000000  # Optional: limit dataset size
 
   # Example 5: Yelp
-  amazon_reviews:
+  yelp_reviews:
     path: datasets/yelp.txt
     enabled: true
     description: "598,000 review from yelp"
     max_chars: 1000000  # Optional: limit dataset size
 
   # Example 6: arxiv
-  amazon_reviews:
+  arxiv_abstracts:
     path: datasets/arxiv_abstracts.txt
     enabled: true
     description: "arXiv dataset and metadata of 1.7M+ scholarly papers across STEM"
