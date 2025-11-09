@@ -9,13 +9,13 @@ seed: 42
 # Training hyperparameters
 training:
   epochs: 25  # 25-50 epochs is usually sufficient (100 is overkill)
-  batch_size: 256  # increase to 128 or 256 if GPU memory allows
+  batch_size: 128  # Reduced from 256 to avoid memory pressure on 4080 Super (16GB VRAM)
   learning_rate: 0.0001
   val_split: 0.1  # fraction of data for validation
   eval_interval: 5  # evaluate every N epochs
   save_interval: 5  # save checkpoint every N epochs
   log_interval: 100  # log loss every N batches (was 10, reduced I/O overhead)
-  use_compile: false  # torch.compile() for faster training (requires Triton, may not work on Windows)
+  use_compile: true  # torch.compile() for 30-50% speedup (requires PyTorch 2.0+, works on Linux)
   skip_completed: true  # skip datasets that have completed training (final .pt file exists)
 
 # Model architecture

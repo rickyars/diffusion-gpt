@@ -7,6 +7,7 @@ import argparse
 import os
 import signal
 import sys
+import time
 from typing import Optional
 
 import torch
@@ -195,7 +196,7 @@ def train_model(
         val_split=val_split,
         vocab_path=vocab_path if os.path.exists(vocab_path) else None,
         shuffle=True,
-        num_workers=2,  # Parallel data loading (adjust based on CPU cores)
+        num_workers=4,  # Increased for faster data loading (adjust based on CPU cores)
         max_chars=max_chars,
     )
 
@@ -208,7 +209,7 @@ def train_model(
         val_split=val_split,
         vocab_path=vocab_path,
         shuffle=False,
-        num_workers=2,
+        num_workers=4,  # Increased for faster data loading
         max_chars=max_chars,
     )
 
@@ -277,6 +278,11 @@ def train_model(
     # Training loop with graceful shutdown handling
     print("\nStarting training...")
     print("Press Ctrl+C to save progress and exit gracefully\n")
+    print(f"Training configuration:")
+    print(f"  Batches per epoch: {len(train_loader)}")
+    print(f"  Samples per epoch: {len(train_loader) * batch_size}")
+    print(f"  Total training steps: {len(train_loader) * epochs}")
+    print()
     model.train()
 
     # Flag for graceful shutdown
@@ -296,6 +302,7 @@ def train_model(
             if should_stop:
                 break
 
+            epoch_start = time.time()
             epoch_loss = 0.0
             num_batches = 0
 
@@ -335,39 +342,42 @@ def train_model(
                           f"Loss: {loss.item():.4f}")
 
             avg_train_loss = epoch_loss / num_batches if num_batches > 0 else 0.0
+            epoch_time = time.time() - epoch_start
+            samples_per_sec = (num_batches * batch_size) / epoch_time if epoch_time > 0 else 0
             print(f"\nEpoch [{epoch+1}/{epochs}] Average Train Loss: {avg_train_loss:.4f}")
+            print(f"  Epoch time: {epoch_time:.1f}s | Throughput: {samples_per_sec:.0f} samples/sec")
 
-        # Validation
-        if (epoch + 1) % eval_interval == 0:
-            model.eval()
-            val_loss = 0.0
-            val_batches = 0
+            # Validation
+            if (epoch + 1) % eval_interval == 0:
+                model.eval()
+                val_loss = 0.0
+                val_batches = 0
 
-            with torch.no_grad():
-                for batch in val_loader:
-                    batch = batch.to(device)
-                    loss = loss_function(model, batch, noise, vocab_size,
-                                       sampling_eps=config['noise']['sigma_min'])
-                    val_loss += loss.item()
-                    val_batches += 1
+                with torch.no_grad():
+                    for batch in val_loader:
+                        batch = batch.to(device)
+                        loss = loss_function(model, batch, noise, vocab_size,
+                                           sampling_eps=config['noise']['sigma_min'])
+                        val_loss += loss.item()
+                        val_batches += 1
 
-            avg_val_loss = val_loss / val_batches if val_batches > 0 else 0.0
-            print(f"Validation Loss: {avg_val_loss:.4f}\n")
-            model.train()
+                avg_val_loss = val_loss / val_batches if val_batches > 0 else 0.0
+                print(f"Validation Loss: {avg_val_loss:.4f}\n")
+                model.train()
 
-        # Save checkpoint
-        if (epoch + 1) % save_interval == 0:
-            checkpoint = {
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'config': model_config.__dict__,
-                'vocab_size': vocab_size,
-                'loss': avg_train_loss,
-            }
-            checkpoint_path = os.path.join(models_dir, f"{dataset_name}_epoch_{epoch+1}.pt")
-            torch.save(checkpoint, checkpoint_path)
-            print(f"Saved checkpoint: {checkpoint_path}\n")
+            # Save checkpoint
+            if (epoch + 1) % save_interval == 0:
+                checkpoint = {
+                    'epoch': epoch,
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'config': model_config.__dict__,
+                    'vocab_size': vocab_size,
+                    'loss': avg_train_loss,
+                }
+                checkpoint_path = os.path.join(models_dir, f"{dataset_name}_epoch_{epoch+1}.pt")
+                torch.save(checkpoint, checkpoint_path)
+                print(f"Saved checkpoint: {checkpoint_path}\n")
 
     except KeyboardInterrupt:
         # Second Ctrl+C - force quit
