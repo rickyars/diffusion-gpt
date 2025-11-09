@@ -160,6 +160,7 @@ def train_model(
     eval_interval = config['training']['eval_interval']
     save_interval = config['training']['save_interval']
     log_interval = config['training']['log_interval']
+    gradient_clip = config['training'].get('gradient_clip', 0.0)  # Default to no clipping
     use_compile = config['training'].get('use_compile', False)  # Default to False for compatibility
 
     # Paths
@@ -196,8 +197,10 @@ def train_model(
         val_split=val_split,
         vocab_path=vocab_path if os.path.exists(vocab_path) else None,
         shuffle=True,
-        num_workers=4,  # Increased for faster data loading (adjust based on CPU cores)
+        num_workers=4,  # Parallel data loading
         max_chars=max_chars,
+        persistent_workers=True,  # Keep workers alive between epochs
+        prefetch_factor=2,  # Prefetch 2 batches per worker
     )
 
     print("Loading validation data...")
@@ -209,8 +212,10 @@ def train_model(
         val_split=val_split,
         vocab_path=vocab_path,
         shuffle=False,
-        num_workers=4,  # Increased for faster data loading
+        num_workers=2,  # Fewer workers for validation
         max_chars=max_chars,
+        persistent_workers=True,
+        prefetch_factor=2,
     )
 
     # Save vocabulary for later use
@@ -234,6 +239,17 @@ def train_model(
 
     print(f"\nModel parameters: {model.get_num_params() / 1e6:.2f}M")
 
+    # Performance optimizations for CUDA
+    if device.type == 'cuda':
+        # Enable TF32 for Ampere+ GPUs (3000/4000 series) - up to 8x faster matmul
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        print("✓ Enabled TF32 precision for faster training on Ampere+ GPUs")
+
+        # Auto-tune cuDNN kernels for your specific hardware (1-2% speedup)
+        torch.backends.cudnn.benchmark = True
+        print("✓ Enabled cuDNN autotuning")
+
     # Compile model for faster training (PyTorch 2.0+)
     # Note: Requires Triton, may not work on Windows
     if use_compile and hasattr(torch, 'compile') and device.type == 'cuda':
@@ -249,8 +265,16 @@ def train_model(
         print("torch.compile() disabled (use_compile: false in config)")
         print("Enable with 'use_compile: true' if you have Triton installed")
 
-    # Initialize optimizer
-    optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
+    # Initialize optimizer - use fused AdamW for CUDA (much faster)
+    if device.type == 'cuda':
+        try:
+            optimizer = optim.AdamW(model.parameters(), lr=learning_rate, fused=True)
+            print("✓ Using fused AdamW optimizer (faster on CUDA)")
+        except Exception:
+            optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
+            print("Using standard AdamW (fused not available)")
+    else:
+        optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
 
     # Mixed precision training for faster computation
     use_amp = device.type == 'cuda'
@@ -320,8 +344,14 @@ def train_model(
                             sampling_eps=config['noise']['sigma_min']
                         )
 
-                    optimizer.zero_grad()
+                    optimizer.zero_grad(set_to_none=True)  # More efficient than zero_grad()
                     scaler.scale(loss).backward()
+
+                    # Gradient clipping (optional, helps with stability)
+                    if gradient_clip > 0:
+                        scaler.unscale_(optimizer)
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
+
                     scaler.step(optimizer)
                     scaler.update()
                 else:
@@ -330,8 +360,13 @@ def train_model(
                         sampling_eps=config['noise']['sigma_min']
                     )
 
-                    optimizer.zero_grad()
+                    optimizer.zero_grad(set_to_none=True)  # More efficient than zero_grad()
                     loss.backward()
+
+                    # Gradient clipping (optional, helps with stability)
+                    if gradient_clip > 0:
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
+
                     optimizer.step()
 
                 epoch_loss += loss.item()
@@ -354,10 +389,18 @@ def train_model(
                 val_batches = 0
 
                 with torch.no_grad():
+                    # Use AMP for validation too (faster)
                     for batch in val_loader:
-                        batch = batch.to(device)
-                        loss = loss_function(model, batch, noise, vocab_size,
-                                           sampling_eps=config['noise']['sigma_min'])
+                        batch = batch.to(device, non_blocking=True)
+
+                        if use_amp:
+                            with torch.amp.autocast('cuda'):
+                                loss = loss_function(model, batch, noise, vocab_size,
+                                                   sampling_eps=config['noise']['sigma_min'])
+                        else:
+                            loss = loss_function(model, batch, noise, vocab_size,
+                                               sampling_eps=config['noise']['sigma_min'])
+
                         val_loss += loss.item()
                         val_batches += 1
 

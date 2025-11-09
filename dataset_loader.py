@@ -134,6 +134,8 @@ def get_data_loader(
     shuffle: bool = True,
     num_workers: int = 0,
     max_chars: Optional[int] = None,
+    persistent_workers: bool = False,
+    prefetch_factor: Optional[int] = None,
 ) -> Tuple[data.DataLoader, int, Dict[int, str], Dict[str, int]]:
     """
     Create a DataLoader for character-level text data.
@@ -148,6 +150,8 @@ def get_data_loader(
         shuffle: Whether to shuffle data
         num_workers: Number of data loading workers
         max_chars: Optional maximum number of characters to load
+        persistent_workers: Keep workers alive between epochs (faster, more memory)
+        prefetch_factor: Number of batches to prefetch per worker
 
     Returns:
         (dataloader, vocab_size, itos, stoi)
@@ -161,12 +165,22 @@ def get_data_loader(
         max_chars=max_chars,
     )
 
-    dataloader = data.DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=shuffle,
-        num_workers=num_workers,
-        pin_memory=torch.cuda.is_available(),
-    )
+    # Build dataloader kwargs
+    dataloader_kwargs = {
+        'batch_size': batch_size,
+        'shuffle': shuffle,
+        'num_workers': num_workers,
+        'pin_memory': torch.cuda.is_available(),
+    }
+
+    # Add persistent_workers only if num_workers > 0 (required by PyTorch)
+    if num_workers > 0 and persistent_workers:
+        dataloader_kwargs['persistent_workers'] = True
+
+    # Add prefetch_factor only if num_workers > 0 (required by PyTorch)
+    if num_workers > 0 and prefetch_factor is not None:
+        dataloader_kwargs['prefetch_factor'] = prefetch_factor
+
+    dataloader = data.DataLoader(dataset, **dataloader_kwargs)
 
     return dataloader, dataset.vocab_size, dataset.itos, dataset.stoi
