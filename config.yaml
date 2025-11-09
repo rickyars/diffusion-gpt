@@ -52,7 +52,7 @@ datasets:
     # max_chars: 1000000  # Optional: limit to first 1M characters
 
   # Example 2: Reddit
-  github_commits:
+  reddit:
     path: datasets/reddit.txt
     enabled: true
     description: "Anonymized comments / scores from 40 subreddits, in uniform number (25000 each)"
