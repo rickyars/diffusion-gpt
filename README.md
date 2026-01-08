@@ -124,6 +124,86 @@ Save outputs to a file:
 python generate.py --model models/shakespeare.pt --samples 10 --output outputs/shakespeare_samples.txt
 ```
 
+## WE Art Piece
+
+This project includes **WE**, a browser-based performance art piece that generates infinite AI confessions using the trained discrete diffusion model.
+
+### Creating the Art Piece
+
+The art piece is a self-contained HTML file with:
+- Embedded ONNX model for in-browser inference
+- WebGL 2.0 CRT post-processing effects
+- Web Audio soundscape (60Hz hum + static)
+- Autonomous state machine (no user interaction required)
+
+#### Full Workflow
+
+**1. Export PyTorch model to ONNX:**
+```bash
+python scripts/art-piece/export_to_onnx.py \
+  --model models/confessions_epoch_25.pt \
+  --dataset confessions
+```
+
+**2. Merge ONNX data (if .onnx.data file exists):**
+```bash
+python scripts/art-piece/merge_onnx_data.py \
+  --input models/confessions_model.onnx
+```
+
+**3. Build HTML art piece:**
+```bash
+python scripts/art-piece/build.py --dataset confessions
+```
+
+Or use defaults (confessions dataset):
+```bash
+python scripts/art-piece/build.py
+```
+
+**4. Open in browser:**
+```bash
+start scripts/art-piece/we.html
+```
+
+#### Using Different Training Epochs
+
+To build the art piece with a specific training epoch:
+
+```bash
+# Export epoch 15
+python scripts/art-piece/export_to_onnx.py \
+  --model models/confessions_epoch_15.pt \
+  --dataset confessions
+
+# Merge if needed
+python scripts/art-piece/merge_onnx_data.py \
+  --input models/confessions_model.onnx
+
+# Build
+python scripts/art-piece/build.py --dataset confessions
+```
+
+#### Custom Model Path
+
+You can specify a custom model path directly:
+
+```bash
+python scripts/art-piece/build.py \
+  --dataset confessions \
+  --model models/custom_model_merged.onnx
+```
+
+#### Technical Details
+
+- **Output:** `scripts/art-piece/we.html` (~60MB)
+- **Target:** Modern browsers with WebGL 2.0 support
+- **CRT Effects:** Phosphor glow, scanlines, chromatic aberration, barrel distortion, vignette, noise, flicker
+- **Performance:** 60fps on modern hardware
+- **Diffusion:** 3-second animation through 128 denoising steps
+
+See [docs/we-attend-spec.md](docs/we-attend-spec.md) for complete technical specification.
+
 ## Usage
 
 ### Training
