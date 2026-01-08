@@ -10,6 +10,7 @@ This project refactors the [original diffusion-gpt notebook](https://github.com/
 - **Character-level diffusion**: Learn to denoise corrupted text character by character
 - **Config-driven**: All hyperparameters in `config.yaml`
 - **CLI tools**: Simple command-line interface for training and generation
+- **Browser deployment**: Run models in the browser via ONNX.js (Arweave/IPFS compatible)
 - **Reproducible**: Set random seeds for deterministic training
 
 Based on the paper: [Discrete Diffusion Modeling by Estimating the Ratios of the Data Distribution](https://arxiv.org/abs/2310.16834)
@@ -94,7 +95,10 @@ datasets:
     path: datasets/shakespeare.txt
     enabled: true  # Set to true
     description: "Shakespeare's complete works"
+    # max_chars: 1000000  # Optional: limit to 1M chars for faster training
 ```
+
+**Tip**: For large datasets, add `max_chars` to limit training time for testing.
 
 ### 3. Train a Model
 
@@ -262,6 +266,29 @@ Options:
 - `--verbose`: Show intermediate denoising steps
 - `--seed`: Random seed for reproducibility
 - `--device`: Device to use
+- `--prefix`: Prefix text to condition generation (optional)
+- `--suffix`: Suffix text to condition generation (optional)
+
+#### Conditional Generation (Prompted)
+
+You can now prompt the model with prefix and/or suffix text to guide generation:
+
+```bash
+# Generate text starting with a specific prefix
+python generate.py \
+  --model pretrained_model/model_epoch_25.pth \
+  --prefix "Once upon a time" \
+  --samples 5
+
+# Generate text with both prefix and suffix (fill-in-the-middle)
+python generate.py \
+  --model pretrained_model/model_epoch_25.pth \
+  --prefix "The quick brown fox" \
+  --suffix "the lazy dog." \
+  --samples 3
+```
+
+The model will use discrete diffusion to generate coherent text that starts with your prefix and/or ends with your suffix, filling in the middle content.
 
 ### Configuration
 
@@ -440,6 +467,17 @@ Delete vocabulary file and retrain to rebuild:
 rm vocab/dataset_name_vocab.pkl
 python train.py --dataset dataset_name
 ```
+
+## 📚 Documentation
+
+Detailed guides have been organized in the `docs/` folder:
+
+- **[docs/CSV_DATASET_GUIDE.md](docs/CSV_DATASET_GUIDE.md)** - Converting CSV files to training format
+- **[docs/WEB_DEMO_README.md](docs/WEB_DEMO_README.md)** - Complete web demo documentation
+- **[docs/ANIMATION_GUIDE.md](docs/ANIMATION_GUIDE.md)** - Creating animated GIFs
+- **[docs/CPU_INFERENCE_GUIDE.md](docs/CPU_INFERENCE_GUIDE.md)** - Running on CPU
+- **[docs/PERFORMANCE.md](docs/PERFORMANCE.md)** - Performance tips and benchmarks
+- **[docs/conditional_generation.md](docs/conditional_generation.md)** - Conditional text generation guide
 
 ## How It Works
 

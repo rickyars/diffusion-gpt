@@ -5,6 +5,7 @@ Supports training on single dataset or multiple datasets sequentially.
 
 import argparse
 import os
+import signal
 import sys
 from typing import Optional
 
@@ -131,6 +132,7 @@ def train_model(
     config: dict,
     device: torch.device,
     resume_from: Optional[str] = None,
+    dataset_config: Optional[dict] = None,
 ):
     """
     Train a discrete diffusion model on a single dataset.
@@ -141,6 +143,7 @@ def train_model(
         config: Configuration dictionary
         device: torch device
         resume_from: Optional path to checkpoint to resume from
+        dataset_config: Optional dataset-specific configuration (for max_chars, etc.)
     """
     print(f"\n{'='*80}")
     print(f"Training model on: {dataset_name}")
@@ -156,6 +159,7 @@ def train_model(
     eval_interval = config['training']['eval_interval']
     save_interval = config['training']['save_interval']
     log_interval = config['training']['log_interval']
+    use_compile = config['training'].get('use_compile', False)  # Default to False for compatibility
 
     # Paths
     models_dir = config['paths']['models_dir']
@@ -165,6 +169,21 @@ def train_model(
 
     vocab_path = os.path.join(vocab_dir, f"{dataset_name}_vocab.pkl")
     model_path = os.path.join(models_dir, f"{dataset_name}.pt")
+
+    # Check if model already exists (skip completed training)
+    skip_completed = config['training'].get('skip_completed', True)
+    if skip_completed and os.path.exists(model_path) and not resume_from:
+        print(f"✓ Model already exists: {model_path}")
+        print(f"  Skipping training (set 'skip_completed: false' in config to retrain)")
+        print(f"{'='*80}\n")
+        return  # Skip this dataset
+
+    # Get max_chars limit from dataset config (optional)
+    max_chars = None
+    if dataset_config:
+        max_chars = dataset_config.get('max_chars', None)
+    if max_chars:
+        print(f"Dataset size limit: {max_chars:,} characters")
 
     # Create dataloaders
     print("Loading training data...")
@@ -176,6 +195,8 @@ def train_model(
         val_split=val_split,
         vocab_path=vocab_path if os.path.exists(vocab_path) else None,
         shuffle=True,
+        num_workers=2,  # Parallel data loading (adjust based on CPU cores)
+        max_chars=max_chars,
     )
 
     print("Loading validation data...")
@@ -187,6 +208,8 @@ def train_model(
         val_split=val_split,
         vocab_path=vocab_path,
         shuffle=False,
+        num_workers=2,
+        max_chars=max_chars,
     )
 
     # Save vocabulary for later use
@@ -210,8 +233,30 @@ def train_model(
 
     print(f"\nModel parameters: {model.get_num_params() / 1e6:.2f}M")
 
+    # Compile model for faster training (PyTorch 2.0+)
+    # Note: Requires Triton, may not work on Windows
+    if use_compile and hasattr(torch, 'compile') and device.type == 'cuda':
+        try:
+            print("Compiling model with torch.compile() (set use_compile: false in config to disable)...")
+            model = torch.compile(model)
+            print("✓ Model compiled successfully - expect 30-50% faster training!")
+        except Exception as e:
+            print(f"⚠ torch.compile() failed: {str(e)[:100]}")
+            print("  Set 'use_compile: false' in config.yaml to disable this attempt")
+            print("  Continuing with eager mode (slightly slower but works fine)")
+    elif not use_compile:
+        print("torch.compile() disabled (use_compile: false in config)")
+        print("Enable with 'use_compile: true' if you have Triton installed")
+
     # Initialize optimizer
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
+
+    # Mixed precision training for faster computation
+    use_amp = device.type == 'cuda'
+    # Use torch.amp.GradScaler instead of deprecated torch.cuda.amp.GradScaler
+    scaler = torch.amp.GradScaler('cuda') if use_amp else None
+    if use_amp:
+        print("Using mixed precision training (AMP) for faster computation")
 
     # Initialize noise schedule
     noise = GeometricNoise(
@@ -223,40 +268,74 @@ def train_model(
     start_epoch = 0
     if resume_from and os.path.exists(resume_from):
         print(f"Resuming from checkpoint: {resume_from}")
-        checkpoint = torch.load(resume_from, map_location=device)
+        checkpoint = torch.load(resume_from, map_location=device, weights_only=False)
         model.load_state_dict(checkpoint['model_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         start_epoch = checkpoint['epoch'] + 1
         print(f"Resuming from epoch {start_epoch}")
 
-    # Training loop
+    # Training loop with graceful shutdown handling
     print("\nStarting training...")
+    print("Press Ctrl+C to save progress and exit gracefully\n")
     model.train()
 
-    for epoch in range(start_epoch, epochs):
-        epoch_loss = 0.0
-        num_batches = 0
+    # Flag for graceful shutdown
+    should_stop = False
 
-        for batch_idx, batch in enumerate(train_loader):
-            batch = batch.to(device)
-            loss = loss_function(
-                model, batch, noise, vocab_size,
-                sampling_eps=config['noise']['sigma_min']
-            )
+    def signal_handler(sig, frame):
+        nonlocal should_stop
+        print("\n\nReceived interrupt signal. Saving checkpoint and exiting gracefully...")
+        print("(Press Ctrl+C again to force quit without saving)")
+        should_stop = True
 
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+    # Register signal handler for graceful shutdown
+    original_handler = signal.signal(signal.SIGINT, signal_handler)
 
-            epoch_loss += loss.item()
-            num_batches += 1
+    try:
+        for epoch in range(start_epoch, epochs):
+            if should_stop:
+                break
 
-            if (batch_idx + 1) % log_interval == 0:
-                print(f"Epoch [{epoch+1}/{epochs}] Batch [{batch_idx+1}/{len(train_loader)}] "
-                      f"Loss: {loss.item():.4f}")
+            epoch_loss = 0.0
+            num_batches = 0
 
-        avg_train_loss = epoch_loss / num_batches
-        print(f"\nEpoch [{epoch+1}/{epochs}] Average Train Loss: {avg_train_loss:.4f}")
+            for batch_idx, batch in enumerate(train_loader):
+                if should_stop:
+                    break
+
+                batch = batch.to(device, non_blocking=True)
+
+                # Mixed precision training
+                if use_amp:
+                    with torch.amp.autocast('cuda'):
+                        loss = loss_function(
+                            model, batch, noise, vocab_size,
+                            sampling_eps=config['noise']['sigma_min']
+                        )
+
+                    optimizer.zero_grad()
+                    scaler.scale(loss).backward()
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    loss = loss_function(
+                        model, batch, noise, vocab_size,
+                        sampling_eps=config['noise']['sigma_min']
+                    )
+
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
+
+                epoch_loss += loss.item()
+                num_batches += 1
+
+                if (batch_idx + 1) % log_interval == 0:
+                    print(f"Epoch [{epoch+1}/{epochs}] Batch [{batch_idx+1}/{len(train_loader)}] "
+                          f"Loss: {loss.item():.4f}")
+
+            avg_train_loss = epoch_loss / num_batches if num_batches > 0 else 0.0
+            print(f"\nEpoch [{epoch+1}/{epochs}] Average Train Loss: {avg_train_loss:.4f}")
 
         # Validation
         if (epoch + 1) % eval_interval == 0:
@@ -290,17 +369,41 @@ def train_model(
             torch.save(checkpoint, checkpoint_path)
             print(f"Saved checkpoint: {checkpoint_path}\n")
 
-    # Save final model
-    final_checkpoint = {
-        'epoch': epochs - 1,
-        'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-        'config': model_config.__dict__,
-        'vocab_size': vocab_size,
-        'loss': avg_train_loss,
-    }
-    torch.save(final_checkpoint, model_path)
-    print(f"\nTraining completed! Final model saved to: {model_path}")
+    except KeyboardInterrupt:
+        # Second Ctrl+C - force quit
+        print("\nForce quit - checkpoint not saved!")
+        raise
+    finally:
+        # Restore original signal handler
+        signal.signal(signal.SIGINT, original_handler)
+
+    # Save final or interrupted checkpoint
+    if should_stop:
+        print("\nSaving interrupted training checkpoint...")
+        interrupted_checkpoint = {
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'config': model_config.__dict__,
+            'vocab_size': vocab_size,
+            'loss': avg_train_loss if num_batches > 0 else float('inf'),
+        }
+        interrupted_path = os.path.join(models_dir, f"{dataset_name}_interrupted_epoch_{epoch+1}.pt")
+        torch.save(interrupted_checkpoint, interrupted_path)
+        print(f"Interrupted checkpoint saved to: {interrupted_path}")
+        print("You can resume training with: python train.py --dataset {dataset_name} --resume {interrupted_path}")
+    else:
+        # Normal completion - save final model
+        final_checkpoint = {
+            'epoch': epochs - 1,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'config': model_config.__dict__,
+            'vocab_size': vocab_size,
+            'loss': avg_train_loss,
+        }
+        torch.save(final_checkpoint, model_path)
+        print(f"\nTraining completed! Final model saved to: {model_path}")
 
 
 def main():
@@ -350,7 +453,7 @@ def main():
             print(f"Please place your .txt file at: {dataset_path}")
             sys.exit(1)
 
-        train_model(args.dataset, dataset_path, config, device, args.resume)
+        train_model(args.dataset, dataset_path, config, device, args.resume, dataset_config)
 
     elif args.all:
         # Train on all enabled datasets
@@ -371,7 +474,7 @@ def main():
                 print(f"Warning: Skipping {dataset_name} - file not found: {dataset_path}")
                 continue
 
-            train_model(dataset_name, dataset_path, config, device)
+            train_model(dataset_name, dataset_path, config, device, dataset_config=dataset_config)
 
     else:
         print("Error: Please specify --dataset <name> or --all")
