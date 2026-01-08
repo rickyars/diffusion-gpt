@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git checkout:*)",
+      "Bash(start we-attend.html)",
+      "Bash(dir:*)",
+      "Bash(python export_to_onnx.py)",
+      "Bash(python -m pip:*)",
+      "Bash(pip install:*)",
+      "Bash(python build_html.py:*)",
+      "Bash(start we-attend-full.html)",
+      "Bash(python build_html_complete.py:*)",
+      "Bash(start we-attend-complete.html)",
+      "Bash(ls:*)",
+      "Bash(python merge_onnx_data.py:*)",
+      "Bash(start test_inference.html)",
+      "Bash(git mv:*)",
+      "Bash(python scripts/art-piece/build.py:*)",
+      "Bash(start scripts/art-piece/we-attend.html)",
+      "Bash(python scripts/art-piece/generate_animation.py:*)",
+      "Bash(python scripts/art-piece/export_to_onnx.py:*)",
+      "Bash(python scripts/art-piece/merge_onnx_data.py:*)",
+      "Bash(python build.py:*)",
+      "Bash(python scripts/training/generate.py:*)",
+      "Bash(start scripts/art-piece/we.html)",
+      "Bash(del model_embedding.js scriptsart-piecemodel_embedding.js)",
+      "Bash(git add:*)"
+    ]
+  }
+}
