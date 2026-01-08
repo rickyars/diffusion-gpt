@@ -27,6 +27,7 @@ class CharacterDataset(data.Dataset):
         split: str = "train",
         val_split: float = 0.1,
         vocab_path: Optional[str] = None,
+        max_chars: Optional[int] = None,
     ):
         """
         Args:
@@ -35,6 +36,7 @@ class CharacterDataset(data.Dataset):
             split: 'train' or 'val'
             val_split: Fraction of data to use for validation
             vocab_path: Optional path to load existing vocabulary pickle
+            max_chars: Optional maximum number of characters to load (None = load all)
         """
         self.context_len = context_len
         self.split = split
@@ -43,6 +45,7 @@ class CharacterDataset(data.Dataset):
         if vocab_path and os.path.exists(vocab_path):
             print(f"Loading vocabulary from {vocab_path}")
             with open(vocab_path, 'rb') as f:
+                # Note: weights_only not available for pickle.load, this is safe for our vocab files
                 meta = pickle.load(f)
                 self.stoi = meta['stoi']
                 self.itos = meta['itos']
@@ -55,6 +58,11 @@ class CharacterDataset(data.Dataset):
         print(f"Loading and encoding text from {data_path}")
         with open(data_path, 'r', encoding='utf-8') as f:
             text = f.read()
+
+        # Limit dataset size if specified
+        if max_chars is not None and len(text) > max_chars:
+            print(f"Limiting dataset to {max_chars:,} characters (original: {len(text):,})")
+            text = text[:max_chars]
 
         # Encode the entire text
         self.data = self._encode(text)
@@ -125,6 +133,7 @@ def get_data_loader(
     vocab_path: Optional[str] = None,
     shuffle: bool = True,
     num_workers: int = 0,
+    max_chars: Optional[int] = None,
 ) -> Tuple[data.DataLoader, int, Dict[int, str], Dict[str, int]]:
     """
     Create a DataLoader for character-level text data.
@@ -138,6 +147,7 @@ def get_data_loader(
         vocab_path: Optional path to vocabulary pickle
         shuffle: Whether to shuffle data
         num_workers: Number of data loading workers
+        max_chars: Optional maximum number of characters to load
 
     Returns:
         (dataloader, vocab_size, itos, stoi)
@@ -148,6 +158,7 @@ def get_data_loader(
         split=split,
         val_split=val_split,
         vocab_path=vocab_path,
+        max_chars=max_chars,
     )
 
     dataloader = data.DataLoader(
