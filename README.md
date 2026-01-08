@@ -20,24 +20,29 @@ Based on the paper: [Discrete Diffusion Modeling by Estimating the Ratios of the
 ```
 diffusion-gpt/
 ├── config.yaml                 # Training configuration
-├── train.py                    # Main training script
-├── generate.py                 # Text generation script
-├── dataset_loader.py           # Dataset loading utilities
 ├── model.py                    # Model architecture
 ├── utils.py                    # Helper functions
 ├── requirements.txt            # Python dependencies
+├── scripts/
+│   ├── training/               # Training pipeline
+│   │   ├── train.py            # Main training script
+│   │   ├── generate.py         # Text generation
+│   │   ├── dataset_loader.py   # Dataset utilities
+│   │   └── generate_animation.py  # Denoising visualization
+│   └── art-piece/              # WE art installation
+│       ├── build.py            # Build HTML with embedded model
+│       ├── export_to_onnx.py   # PyTorch → ONNX converter
+│       ├── merge_onnx_data.py  # Merge ONNX external data
+│       └── we.html             # Self-contained art piece (~60MB)
 ├── datasets/                   # Place your .txt files here
-│   ├── shakespeare.txt
-│   ├── github_commits.txt
-│   └── ...
+│   └── shakespeare.txt
 ├── models/                     # Saved model checkpoints
-│   ├── shakespeare.pt
-│   └── ...
+│   └── shakespeare.pt
 ├── vocab/                      # Vocabulary files
-│   ├── shakespeare_vocab.pkl
-│   └── ...
-└── outputs/                    # Generated samples
-    ├── shakespeare_samples.txt
+│   └── shakespeare_vocab.pkl
+└── docs/                       # Documentation guides
+    ├── we-attend-spec.md
+    ├── CSV_DATASET_GUIDE.md
     └── ...
 ```
 
@@ -104,24 +109,24 @@ datasets:
 
 Train on a single dataset:
 ```bash
-python train.py --dataset shakespeare
+python scripts/training/train.py --dataset shakespeare
 ```
 
 Or train on all enabled datasets:
 ```bash
-python train.py --all
+python scripts/training/train.py --all
 ```
 
 ### 4. Generate Samples
 
 Generate text from a trained model:
 ```bash
-python generate.py --model models/shakespeare.pt --samples 5
+python scripts/training/generate.py --model models/shakespeare.pt --samples 5
 ```
 
 Save outputs to a file:
 ```bash
-python generate.py --model models/shakespeare.pt --samples 10 --output outputs/shakespeare_samples.txt
+python scripts/training/generate.py --model models/shakespeare.pt --samples 10 --output outputs/shakespeare_samples.txt
 ```
 
 ## WE Art Piece
@@ -211,7 +216,7 @@ See [docs/we-attend-spec.md](docs/we-attend-spec.md) for complete technical spec
 #### Train on a Single Dataset
 
 ```bash
-python train.py --dataset <dataset_name>
+python scripts/training/train.py --dataset <dataset_name>
 ```
 
 Options:
@@ -222,13 +227,13 @@ Options:
 
 Example:
 ```bash
-python train.py --dataset github_commits --device cuda
+python scripts/training/train.py --dataset github_commits --device cuda
 ```
 
 #### Train on All Datasets
 
 ```bash
-python train.py --all
+python scripts/training/train.py --all
 ```
 
 This trains models sequentially on all datasets marked with `enabled: true` in `config.yaml`.
@@ -236,7 +241,7 @@ This trains models sequentially on all datasets marked with `enabled: true` in `
 #### Resume Training
 
 ```bash
-python train.py --dataset shakespeare --resume models/shakespeare_epoch_50.pt
+python scripts/training/train.py --dataset shakespeare --resume models/shakespeare_epoch_50.pt
 ```
 
 ### Generation
@@ -244,13 +249,13 @@ python train.py --dataset shakespeare --resume models/shakespeare_epoch_50.pt
 #### Basic Generation
 
 ```bash
-python generate.py --model models/shakespeare.pt
+python scripts/training/generate.py --model models/shakespeare.pt
 ```
 
 #### Advanced Options
 
 ```bash
-python generate.py \
+python scripts/training/generate.py \
   --model models/shakespeare.pt \
   --samples 20 \
   --steps 128 \
@@ -275,14 +280,14 @@ You can now prompt the model with prefix and/or suffix text to guide generation:
 
 ```bash
 # Generate text starting with a specific prefix
-python generate.py \
-  --model pretrained_model/model_epoch_25.pth \
+python scripts/training/generate.py \
+  --model models/shakespeare.pt \
   --prefix "Once upon a time" \
   --samples 5
 
 # Generate text with both prefix and suffix (fill-in-the-middle)
-python generate.py \
-  --model pretrained_model/model_epoch_25.pth \
+python scripts/training/generate.py \
+  --model models/shakespeare.pt \
   --prefix "The quick brown fox" \
   --suffix "the lazy dog." \
   --samples 3
@@ -465,7 +470,7 @@ model:
 Delete vocabulary file and retrain to rebuild:
 ```bash
 rm vocab/dataset_name_vocab.pkl
-python train.py --dataset dataset_name
+python scripts/training/train.py --dataset dataset_name
 ```
 
 ## 📚 Documentation
