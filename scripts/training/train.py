@@ -15,6 +15,9 @@ import torch
 import torch.optim as optim
 import yaml
 
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+
 from dataset_loader import get_data_loader
 from model import GPT, GPTConfig
 from utils import GeometricNoise, perturb_batch, set_seed
