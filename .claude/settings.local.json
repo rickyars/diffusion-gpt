@@ -24,7 +24,9 @@
       "Bash(python scripts/training/generate.py:*)",
       "Bash(start scripts/art-piece/we.html)",
       "Bash(del model_embedding.js scriptsart-piecemodel_embedding.js)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(tree:*)",
+      "Bash(python:*)"
     ]
   }
 }
