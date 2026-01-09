@@ -8,7 +8,7 @@ seed: 42
 
 # Training hyperparameters
 training:
-  epochs: 25  # 25-50 epochs is usually sufficient (100 is overkill)
+  epochs: 60  # 25-50 epochs is usually sufficient (100 is overkill)
   batch_size: 256  # increase to 128 or 256 if GPU memory allows
   learning_rate: 0.0001
   val_split: 0.1  # fraction of data for validation
@@ -56,7 +56,7 @@ datasets:
     path: datasets/reddit-confessions-sample.txt
     enabled: true
     description: "1M Reddit confessions"
-    max_chars: 1000000  # Optional: limit dataset size
+    #max_chars: 1000000  # Optional: limit dataset size
 
   # r/confession
   confession:
