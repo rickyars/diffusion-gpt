@@ -9,8 +9,10 @@ This project refactors the [original diffusion-gpt notebook](https://github.com/
 - **Multi-dataset training**: Train separate models on different text corpora
 - **Character-level diffusion**: Learn to denoise corrupted text character by character
 - **Config-driven**: All hyperparameters in `config.yaml`
+- **Performance optimization**: Mixed-precision training (AMP), `torch.compile()` support, non-blocking GPU transfer
 - **CLI tools**: Simple command-line interface for training and generation
 - **Browser deployment**: Run models in the browser via ONNX.js (Arweave/IPFS compatible)
+- **Conditional generation**: Generate text with prefix/suffix constraints
 - **Reproducible**: Set random seeds for deterministic training
 
 Based on the paper: [Discrete Diffusion Modeling by Estimating the Ratios of the Data Distribution](https://arxiv.org/abs/2310.16834)
@@ -41,8 +43,8 @@ diffusion-gpt/
 ├── vocab/                      # Vocabulary files
 │   └── shakespeare_vocab.pkl
 └── docs/                       # Documentation guides
-    ├── we-attend-spec.md
-    ├── CSV_DATASET_GUIDE.md
+    ├── WE_CUSTOMIZATION_GUIDE.md
+    ├── ANIMATION_GUIDE.md
     └── ...
 ```
 
@@ -207,7 +209,7 @@ python scripts/art-piece/build.py \
 - **Performance:** 60fps on modern hardware
 - **Diffusion:** 3-second animation through 128 denoising steps
 
-See [docs/we-attend-spec.md](docs/we-attend-spec.md) for complete technical specification.
+See [docs/WE_CUSTOMIZATION_GUIDE.md](docs/WE_CUSTOMIZATION_GUIDE.md) for customization details.
 
 ## Usage
 
@@ -473,16 +475,35 @@ rm vocab/dataset_name_vocab.pkl
 python scripts/training/train.py --dataset dataset_name
 ```
 
+## Performance Optimization
+
+### torch.compile() for Faster Training
+
+For CUDA devices, enable `torch.compile()` in `config.yaml` to get significant speedups (typically 20-40%):
+
+```yaml
+training:
+  use_compile: true  # Enable torch.compile (CUDA only)
+```
+
+The first run will be slower (compilation overhead), but subsequent runs are much faster. If compilation fails, it falls back automatically to standard execution.
+
+### Automatic Mixed Precision (AMP)
+
+Mixed-precision training is automatically enabled on CUDA devices:
+- Forward pass: FP16 (faster, lower memory)
+- Loss computation: FP32 (numerical stability)
+- Gradient scaling: Automatic
+
+No configuration needed—it works automatically and can reduce memory usage by ~30%.
+
 ## 📚 Documentation
 
 Detailed guides have been organized in the `docs/` folder:
 
-- **[docs/CSV_DATASET_GUIDE.md](docs/CSV_DATASET_GUIDE.md)** - Converting CSV files to training format
-- **[docs/WEB_DEMO_README.md](docs/WEB_DEMO_README.md)** - Complete web demo documentation
-- **[docs/ANIMATION_GUIDE.md](docs/ANIMATION_GUIDE.md)** - Creating animated GIFs
-- **[docs/CPU_INFERENCE_GUIDE.md](docs/CPU_INFERENCE_GUIDE.md)** - Running on CPU
-- **[docs/PERFORMANCE.md](docs/PERFORMANCE.md)** - Performance tips and benchmarks
-- **[docs/conditional_generation.md](docs/conditional_generation.md)** - Conditional text generation guide
+- **[docs/WE_CUSTOMIZATION_GUIDE.md](docs/WE_CUSTOMIZATION_GUIDE.md)** - Customizing the WE art piece and converting models to ONNX
+- **[docs/ANIMATION_GUIDE.md](docs/ANIMATION_GUIDE.md)** - Creating animated GIFs of denoising process
+- **[docs/CONDITIONAL_GENERATION.md](docs/CONDITIONAL_GENERATION.md)** - Conditional text generation with prefix/suffix constraints
 
 ## How It Works
 
