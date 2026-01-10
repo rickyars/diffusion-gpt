@@ -8,8 +8,8 @@ seed: 42
 
 # Training hyperparameters
 training:
-  epochs: 60  # 25-50 epochs is usually sufficient (100 is overkill)
-  batch_size: 256  # increase to 128 or 256 if GPU memory allows
+  epochs: 50  # 25-50 epochs is usually sufficient (100 is overkill)
+  batch_size: 384  # increase to 128 or 256 if GPU memory allows
   learning_rate: 0.0001
   val_split: 0.1  # fraction of data for validation
   eval_interval: 5  # evaluate every N epochs
@@ -51,12 +51,11 @@ datasets:
     description: "Shakespeare's complete works"
     # max_chars: 1000000  # Optional: limit to first 1M characters
 
-  # 1M Reddit confessions
+  # 1M Reddit confessions, as sample
   confessions-sample:
     path: datasets/reddit-confessions-sample.txt
     enabled: true
     description: "1M Reddit confessions"
-    #max_chars: 1000000  # Optional: limit dataset size
 
   # r/confession
   confession:
