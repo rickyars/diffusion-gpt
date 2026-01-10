@@ -26,7 +26,8 @@
       "Bash(del model_embedding.js scriptsart-piecemodel_embedding.js)",
       "Bash(git add:*)",
       "Bash(tree:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(git clone:*)"
     ]
   }
 }
