@@ -183,6 +183,7 @@ def train_model(
     save_interval = config['training']['save_interval']
     log_interval = config['training']['log_interval']
     use_compile = config['training'].get('use_compile', False)  # Default to False for compatibility
+    use_fused_adamw = config['training'].get('use_fused_adamw', True)  # Default to True for speed
 
     # Paths
     models_dir = config['paths']['models_dir']
@@ -287,8 +288,29 @@ def train_model(
         print("torch.compile() disabled (use_compile: false in config)")
         print("Enable with 'use_compile: true' if you have Triton installed")
 
+    # Check fused AdamW compatibility if requested
+    if use_fused_adamw and device.type == 'cuda':
+        try:
+            # Test if fused AdamW works with gradient scaler
+            test_param = torch.nn.Parameter(torch.randn(1, device=device))
+            test_opt = optim.AdamW([test_param], lr=learning_rate, fused=True)
+            test_loss = test_param.sum()
+            test_scaler = torch.amp.GradScaler('cuda')
+            test_scaler.scale(test_loss).backward()
+            test_scaler.step(test_opt)
+            test_scaler.update()
+            print("[ON]  Fused AdamW optimizer (5-8% speedup)")
+        except (TypeError, RuntimeError, AssertionError) as e:
+            print(f"[OFF] Fused AdamW (incompatible: {str(e)[:60]})")
+            use_fused_adamw = False
+    elif use_fused_adamw:
+        print("[OFF] Fused AdamW (requires CUDA)")
+        use_fused_adamw = False
+    else:
+        print("[OFF] Fused AdamW")
+
     # Initialize optimizer
-    optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
+    optimizer = optim.AdamW(model.parameters(), lr=learning_rate, fused=use_fused_adamw)
 
     # Load optimizer state if resuming
     if resume_from and os.path.exists(resume_from) and start_epoch > 0:
