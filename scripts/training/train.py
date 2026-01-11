@@ -338,6 +338,14 @@ def train_model(
             except (RuntimeError, KeyError):
                 print("[WARN] Could not load optimizer state, starting with fresh optimizer")
 
+        # Check for loss weight mode mismatch (allows intentional switching for multi-stage training)
+        checkpoint_loss_weight_mode = checkpoint.get('loss_weight_mode', 'uniform')  # Old checkpoints default to uniform
+        if checkpoint_loss_weight_mode != loss_weight_mode:
+            print(f"[INFO] Loss weighting mode changed:")
+            print(f"       Checkpoint was trained with: {checkpoint_loss_weight_mode}")
+            print(f"       Resuming training with: {loss_weight_mode}")
+            print(f"       This enables multi-stage training (e.g., importance → snr)")
+
     # Mixed precision training for faster computation
     # Use torch.amp.GradScaler instead of deprecated torch.cuda.amp.GradScaler
     scaler = torch.amp.GradScaler('cuda') if use_amp and device.type == 'cuda' else None
@@ -472,6 +480,7 @@ def train_model(
                     'vocab_size': vocab_size,
                     'loss': avg_train_loss,
                     'optimizer_mode': 'fused' if use_fused_adamw else 'standard',
+                    'loss_weight_mode': loss_weight_mode,
                 }
                 checkpoint_path = os.path.join(models_dir, f"{dataset_name}_epoch_{epoch+1}.pt")
                 torch.save(checkpoint, checkpoint_path)
@@ -499,6 +508,7 @@ def train_model(
             'vocab_size': vocab_size,
             'loss': avg_train_loss if num_batches > 0 else float('inf'),
             'optimizer_mode': 'fused' if use_fused_adamw else 'standard',
+            'loss_weight_mode': loss_weight_mode,
         }
         interrupted_path = os.path.join(models_dir, f"{dataset_name}_interrupted_epoch_{epoch+1}.pt")
         torch.save(interrupted_checkpoint, interrupted_path)
@@ -514,6 +524,7 @@ def train_model(
             'vocab_size': vocab_size,
             'loss': avg_train_loss,
             'optimizer_mode': 'fused' if use_fused_adamw else 'standard',
+            'loss_weight_mode': loss_weight_mode,
         }
         torch.save(final_checkpoint, model_path)
         print(f"\nTraining completed! Final model saved to: {model_path}")
