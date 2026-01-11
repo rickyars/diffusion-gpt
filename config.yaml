@@ -17,7 +17,8 @@ training:
   log_interval: 100  # log loss every N batches (was 10, reduced I/O overhead)
   use_compile: true  # torch.compile() for faster training (requires Triton, may not work on Windows)
   use_fused_adamw: true  # Enable fused AdamW optimizer (5-8% speedup on NVIDIA GPUs, requires CUDA)
-  loss_weight_mode: 'uniform'  # options: 'uniform' (baseline), 'snr' (emphasize sharpness), 'importance' (faster convergence)
+  use_amp: true  # Enable mixed precision training (AMP) for faster computation (requires CUDA, slightly less stable than FP32)
+  loss_weight_mode: 'snr'  # options: 'uniform' (baseline), 'snr' (emphasize sharpness), 'importance' (faster convergence)
   skip_completed: true  # skip datasets that have completed training (final .pt file exists)
 
 # Model architecture
