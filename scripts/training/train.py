@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from dataset_loader import get_data_loader
 from model import GPT, GPTConfig
-from utils import GeometricNoise, perturb_batch, set_seed
+from utils import GeometricNoise, perturb_batch, set_seed, compute_loss_weight
 
 # Configure Triton and torch inductor cache to use shorter paths on Windows
 # to avoid path length issues with torch.compile()
@@ -118,6 +118,7 @@ def loss_function(
     t: Optional[torch.Tensor] = None,
     x_t: Optional[torch.Tensor] = None,
     sampling_eps: float = 1e-3,
+    loss_weight_mode: str = 'uniform',
 ) -> torch.Tensor:
     """
     Computes the loss for a batch of data.
@@ -130,6 +131,7 @@ def loss_function(
         t: (B,) float tensor with time steps in [0, 1]. If None, sampled uniformly.
         x_t: (B, L) int tensor with perturbed tokens. If None, generated on-the-fly.
         sampling_eps: small epsilon to avoid 0 or 1 time steps
+        loss_weight_mode: loss weighting mode ('uniform', 'snr', 'importance'). Defaults to 'uniform'.
 
     Returns:
         loss: scalar tensor with the loss
@@ -144,7 +146,18 @@ def loss_function(
 
     log_score = model(x_t, sigma_bar)
     loss = score_entropy(log_score, sigma_bar[:, None], x_t, x0, vocab_size)
-    loss = (sigma[:, None] * loss).mean(dim=-1).mean()
+
+    # Apply sigma weighting (derivative of noise schedule, required by theory)
+    # Shape: (B, L) -> (B,)
+    loss = (sigma[:, None] * loss).mean(dim=-1)
+
+    # Apply optional loss weighting by noise level
+    if loss_weight_mode != 'uniform':
+        weight = compute_loss_weight(sigma, mode=loss_weight_mode)  # Shape (B,)
+        loss = loss * weight
+
+    # Final batch average
+    loss = loss.mean()
 
     return loss
 
@@ -184,6 +197,8 @@ def train_model(
     log_interval = config['training']['log_interval']
     use_compile = config['training'].get('use_compile', False)  # Default to False for compatibility
     use_fused_adamw = config['training'].get('use_fused_adamw', True)  # Default to True for speed
+    use_amp = config['training'].get('use_amp', device.type == 'cuda')  # Default to True on CUDA, False on CPU
+    loss_weight_mode = config['training'].get('loss_weight_mode', 'uniform')  # Default to uniform for backward compatibility
 
     # Paths
     models_dir = config['paths']['models_dir']
@@ -277,16 +292,11 @@ def train_model(
     # Note: Requires Triton, may not work on Windows
     if use_compile and hasattr(torch, 'compile') and device.type == 'cuda':
         try:
-            print("Compiling model with torch.compile() (set use_compile: false in config to disable)...")
             model = torch.compile(model)
-            print("✓ Model compiled successfully - expect 30-50% faster training!")
         except Exception as e:
-            print(f"⚠ torch.compile() failed: {str(e)[:100]}")
-            print("  Set 'use_compile: false' in config.yaml to disable this attempt")
-            print("  Continuing with eager mode (slightly slower but works fine)")
-    elif not use_compile:
-        print("torch.compile() disabled (use_compile: false in config)")
-        print("Enable with 'use_compile: true' if you have Triton installed")
+            print(f"[WARN] torch.compile() failed: {str(e)[:100]}")
+            print(f"       Set 'use_compile: false' in config.yaml to disable")
+            use_compile = False
 
     # Check fused AdamW compatibility if requested
     if use_fused_adamw and device.type == 'cuda':
@@ -299,15 +309,12 @@ def train_model(
             test_scaler.scale(test_loss).backward()
             test_scaler.step(test_opt)
             test_scaler.update()
-            print("[ON]  Fused AdamW optimizer (5-8% speedup)")
         except (TypeError, RuntimeError, AssertionError) as e:
-            print(f"[OFF] Fused AdamW (incompatible: {str(e)[:60]})")
+            print(f"[WARN] Fused AdamW incompatible: {str(e)[:60]}")
             use_fused_adamw = False
     elif use_fused_adamw:
-        print("[OFF] Fused AdamW (requires CUDA)")
+        print(f"[WARN] Fused AdamW requires CUDA, using standard AdamW")
         use_fused_adamw = False
-    else:
-        print("[OFF] Fused AdamW")
 
     # Initialize optimizer
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, fused=use_fused_adamw)
@@ -331,12 +338,20 @@ def train_model(
             except (RuntimeError, KeyError):
                 print("[WARN] Could not load optimizer state, starting with fresh optimizer")
 
+        # Check for loss weight mode mismatch (allows intentional switching for multi-stage training)
+        checkpoint_loss_weight_mode = checkpoint.get('loss_weight_mode', 'uniform')  # Old checkpoints default to uniform
+        if checkpoint_loss_weight_mode != loss_weight_mode:
+            print(f"[INFO] Loss weighting mode changed:")
+            print(f"       Checkpoint was trained with: {checkpoint_loss_weight_mode}")
+            print(f"       Resuming training with: {loss_weight_mode}")
+            print(f"       This enables multi-stage training (e.g., importance → snr)")
+
     # Mixed precision training for faster computation
-    use_amp = device.type == 'cuda'
     # Use torch.amp.GradScaler instead of deprecated torch.cuda.amp.GradScaler
-    scaler = torch.amp.GradScaler('cuda') if use_amp else None
-    if use_amp:
-        print("Using mixed precision training (AMP) for faster computation")
+    scaler = torch.amp.GradScaler('cuda') if use_amp and device.type == 'cuda' else None
+    if use_amp and device.type != 'cuda':
+        print(f"[WARN] Mixed precision training requested but not available on CPU, disabling AMP")
+        use_amp = False
 
     # Initialize noise schedule
     noise = GeometricNoise(
@@ -347,10 +362,23 @@ def train_model(
     # Training loop with graceful shutdown handling
     print("\nStarting training...")
     print("Press Ctrl+C to save progress and exit gracefully\n")
-    print(f"Training configuration:")
-    print(f"  Batches per epoch: {len(train_loader)}")
-    print(f"  Samples per epoch: {len(train_loader) * batch_size}")
-    print(f"  Total training steps: {len(train_loader) * epochs}")
+
+    # Display active training configuration
+    print("=" * 80)
+    print("TRAINING CONFIGURATION")
+    print("=" * 80)
+    print(f"Optimizer:")
+    print(f"  AdamW mode:              {'fused' if use_fused_adamw else 'standard'}")
+    print(f"Computation:")
+    print(f"  torch.compile:           {'enabled' if use_compile else 'disabled'}")
+    print(f"  Mixed precision (AMP):   {'enabled' if use_amp else 'disabled'}")
+    print(f"Loss:")
+    print(f"  Weighting mode:          {loss_weight_mode}")
+    print(f"Data:")
+    print(f"  Batches per epoch:       {len(train_loader)}")
+    print(f"  Samples per epoch:       {len(train_loader) * batch_size}")
+    print(f"  Total training steps:    {len(train_loader) * epochs}")
+    print("=" * 80)
     print()
     model.train()
 
@@ -387,7 +415,8 @@ def train_model(
                     with torch.amp.autocast('cuda'):
                         loss = loss_function(
                             model, batch, noise, vocab_size,
-                            sampling_eps=config['noise']['sigma_min']
+                            sampling_eps=config['noise']['sigma_min'],
+                            loss_weight_mode=loss_weight_mode
                         )
 
                     optimizer.zero_grad()
@@ -397,7 +426,8 @@ def train_model(
                 else:
                     loss = loss_function(
                         model, batch, noise, vocab_size,
-                        sampling_eps=config['noise']['sigma_min']
+                        sampling_eps=config['noise']['sigma_min'],
+                        loss_weight_mode=loss_weight_mode
                     )
 
                     optimizer.zero_grad()
@@ -429,7 +459,8 @@ def train_model(
                     for batch in val_loader:
                         batch = batch.to(device)
                         loss = loss_function(model, batch, noise, vocab_size,
-                                           sampling_eps=config['noise']['sigma_min'])
+                                           sampling_eps=config['noise']['sigma_min'],
+                                           loss_weight_mode=loss_weight_mode)
                         val_loss += loss.item()
                         val_batches += 1
 
@@ -449,6 +480,7 @@ def train_model(
                     'vocab_size': vocab_size,
                     'loss': avg_train_loss,
                     'optimizer_mode': 'fused' if use_fused_adamw else 'standard',
+                    'loss_weight_mode': loss_weight_mode,
                 }
                 checkpoint_path = os.path.join(models_dir, f"{dataset_name}_epoch_{epoch+1}.pt")
                 torch.save(checkpoint, checkpoint_path)
@@ -476,6 +508,7 @@ def train_model(
             'vocab_size': vocab_size,
             'loss': avg_train_loss if num_batches > 0 else float('inf'),
             'optimizer_mode': 'fused' if use_fused_adamw else 'standard',
+            'loss_weight_mode': loss_weight_mode,
         }
         interrupted_path = os.path.join(models_dir, f"{dataset_name}_interrupted_epoch_{epoch+1}.pt")
         torch.save(interrupted_checkpoint, interrupted_path)
@@ -491,6 +524,7 @@ def train_model(
             'vocab_size': vocab_size,
             'loss': avg_train_loss,
             'optimizer_mode': 'fused' if use_fused_adamw else 'standard',
+            'loss_weight_mode': loss_weight_mode,
         }
         torch.save(final_checkpoint, model_path)
         print(f"\nTraining completed! Final model saved to: {model_path}")
