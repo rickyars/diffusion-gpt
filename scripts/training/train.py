@@ -183,6 +183,7 @@ def train_model(
     save_interval = config['training']['save_interval']
     log_interval = config['training']['log_interval']
     use_compile = config['training'].get('use_compile', False)  # Default to False for compatibility
+    use_fused_adamw = config['training'].get('use_fused_adamw', True)  # Default to True for speed
 
     # Paths
     models_dir = config['paths']['models_dir']
@@ -287,13 +288,48 @@ def train_model(
         print("torch.compile() disabled (use_compile: false in config)")
         print("Enable with 'use_compile: true' if you have Triton installed")
 
+    # Check fused AdamW compatibility if requested
+    if use_fused_adamw and device.type == 'cuda':
+        try:
+            # Test if fused AdamW works with gradient scaler
+            test_param = torch.nn.Parameter(torch.randn(1, device=device))
+            test_opt = optim.AdamW([test_param], lr=learning_rate, fused=True)
+            test_loss = test_param.sum()
+            test_scaler = torch.amp.GradScaler('cuda')
+            test_scaler.scale(test_loss).backward()
+            test_scaler.step(test_opt)
+            test_scaler.update()
+            print("[ON]  Fused AdamW optimizer (5-8% speedup)")
+        except (TypeError, RuntimeError, AssertionError) as e:
+            print(f"[OFF] Fused AdamW (incompatible: {str(e)[:60]})")
+            use_fused_adamw = False
+    elif use_fused_adamw:
+        print("[OFF] Fused AdamW (requires CUDA)")
+        use_fused_adamw = False
+    else:
+        print("[OFF] Fused AdamW")
+
     # Initialize optimizer
-    optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
+    optimizer = optim.AdamW(model.parameters(), lr=learning_rate, fused=use_fused_adamw)
 
     # Load optimizer state if resuming
     if resume_from and os.path.exists(resume_from) and start_epoch > 0:
         checkpoint = torch.load(resume_from, map_location=device, weights_only=False)
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+        # Check for optimizer mode mismatch
+        checkpoint_optimizer_mode = checkpoint.get('optimizer_mode', 'standard')  # Old checkpoints default to standard
+        current_optimizer_mode = 'fused' if use_fused_adamw else 'standard'
+
+        if checkpoint_optimizer_mode != current_optimizer_mode:
+            print(f"[WARN] Optimizer mode mismatch:")
+            print(f"       Checkpoint was trained with: {checkpoint_optimizer_mode} AdamW")
+            print(f"       Current training uses: {current_optimizer_mode} AdamW")
+            print(f"       Optimizer state discarded (model weights preserved)")
+        else:
+            try:
+                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            except (RuntimeError, KeyError):
+                print("[WARN] Could not load optimizer state, starting with fresh optimizer")
 
     # Mixed precision training for faster computation
     use_amp = device.type == 'cuda'
@@ -412,6 +448,7 @@ def train_model(
                     'config': model_config.__dict__,
                     'vocab_size': vocab_size,
                     'loss': avg_train_loss,
+                    'optimizer_mode': 'fused' if use_fused_adamw else 'standard',
                 }
                 checkpoint_path = os.path.join(models_dir, f"{dataset_name}_epoch_{epoch+1}.pt")
                 torch.save(checkpoint, checkpoint_path)
@@ -438,6 +475,7 @@ def train_model(
             'config': model_config.__dict__,
             'vocab_size': vocab_size,
             'loss': avg_train_loss if num_batches > 0 else float('inf'),
+            'optimizer_mode': 'fused' if use_fused_adamw else 'standard',
         }
         interrupted_path = os.path.join(models_dir, f"{dataset_name}_interrupted_epoch_{epoch+1}.pt")
         torch.save(interrupted_checkpoint, interrupted_path)
@@ -452,6 +490,7 @@ def train_model(
             'config': model_config.__dict__,
             'vocab_size': vocab_size,
             'loss': avg_train_loss,
+            'optimizer_mode': 'fused' if use_fused_adamw else 'standard',
         }
         torch.save(final_checkpoint, model_path)
         print(f"\nTraining completed! Final model saved to: {model_path}")
