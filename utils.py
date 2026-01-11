@@ -160,6 +160,53 @@ def staggered_score(score: torch.Tensor, delta_sigma: torch.Tensor) -> torch.Ten
     return correction + score / exp_factor
 
 
+def compute_loss_weight(sigma: torch.Tensor, mode: str = 'uniform') -> torch.Tensor:
+    """
+    Compute loss weights based on noise level (sigma) and weighting mode.
+
+    This implements loss weighting strategies from D3PM and EDM papers to improve
+    sample quality (diversity, sharpness) without performance overhead.
+
+    Args:
+        sigma: (B,) tensor of noise levels at current timestep
+        mode: weighting mode, one of:
+            - 'uniform': No weighting, returns all 1s (baseline behavior)
+            - 'snr': Signal-to-Noise Ratio weighting, emphasizes low noise (clean data)
+                     Formula: weight = 1.0 / (sigma^2 + 1.0)
+                     Effect: Improves sharpness and fine details
+                     Reference: EDM (Karras et al. 2022)
+            - 'importance': Importance sampling, emphasizes middle timesteps
+                            Formula: weight = sigma / (sigma + 1.0)
+                            Effect: Promotes faster convergence, stronger learning signal
+                            Reference: D3PM (Austin et al. 2021)
+
+    Returns:
+        weight: (B,) tensor of loss weights, same shape as input sigma
+
+    Raises:
+        ValueError: if mode is not one of 'uniform', 'snr', 'importance'
+
+    References:
+        - D3PM: Discrete Diffusion Probabilistic Models (https://arxiv.org/abs/2107.03006)
+        - EDM: Elucidating the Design Space of Diffusion-Based Generative Models (https://arxiv.org/abs/2206.00364)
+    """
+    if mode == 'uniform':
+        return torch.ones_like(sigma)
+    elif mode == 'snr':
+        # SNR weighting: emphasizes denoising at low noise levels
+        # Formula: weight = 1 / (sigma^2 + 1)
+        return 1.0 / (sigma ** 2 + 1.0)
+    elif mode == 'importance':
+        # Importance sampling weighting: emphasizes middle timesteps
+        # Formula: weight = sigma / (sigma + 1)
+        return sigma / (sigma + 1.0)
+    else:
+        raise ValueError(
+            f"Unknown loss weighting mode: '{mode}'. "
+            f"Must be one of: 'uniform', 'snr', 'importance'"
+        )
+
+
 def sample_categorical(probs: torch.Tensor) -> torch.Tensor:
     """
     Sample from a batch of categorical distributions using the Gumbel-max trick.

@@ -8,8 +8,8 @@ seed: 42
 
 # Training hyperparameters
 training:
-  epochs: 50  # 25-50 epochs is usually sufficient (100 is overkill)
-  batch_size: 384  # increase to 128 or 256 if GPU memory allows
+  epochs: 51  # 25-50 epochs is usually sufficient (100 is overkill)
+  batch_size: 352  # increase to 128 or 256 if GPU memory allows
   learning_rate: 0.0001
   val_split: 0.1  # fraction of data for validation
   eval_interval: 5  # evaluate every N epochs
@@ -17,6 +17,7 @@ training:
   log_interval: 100  # log loss every N batches (was 10, reduced I/O overhead)
   use_compile: true  # torch.compile() for faster training (requires Triton, may not work on Windows)
   use_fused_adamw: true  # Enable fused AdamW optimizer (5-8% speedup on NVIDIA GPUs, requires CUDA)
+  loss_weight_mode: 'uniform'  # options: 'uniform' (baseline), 'snr' (emphasize sharpness), 'importance' (faster convergence)
   skip_completed: true  # skip datasets that have completed training (final .pt file exists)
 
 # Model architecture

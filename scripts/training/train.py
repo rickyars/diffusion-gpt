@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from dataset_loader import get_data_loader
 from model import GPT, GPTConfig
-from utils import GeometricNoise, perturb_batch, set_seed
+from utils import GeometricNoise, perturb_batch, set_seed, compute_loss_weight
 
 # Configure Triton and torch inductor cache to use shorter paths on Windows
 # to avoid path length issues with torch.compile()
@@ -118,6 +118,7 @@ def loss_function(
     t: Optional[torch.Tensor] = None,
     x_t: Optional[torch.Tensor] = None,
     sampling_eps: float = 1e-3,
+    loss_weight_mode: str = 'uniform',
 ) -> torch.Tensor:
     """
     Computes the loss for a batch of data.
@@ -130,6 +131,7 @@ def loss_function(
         t: (B,) float tensor with time steps in [0, 1]. If None, sampled uniformly.
         x_t: (B, L) int tensor with perturbed tokens. If None, generated on-the-fly.
         sampling_eps: small epsilon to avoid 0 or 1 time steps
+        loss_weight_mode: loss weighting mode ('uniform', 'snr', 'importance'). Defaults to 'uniform'.
 
     Returns:
         loss: scalar tensor with the loss
@@ -144,7 +146,18 @@ def loss_function(
 
     log_score = model(x_t, sigma_bar)
     loss = score_entropy(log_score, sigma_bar[:, None], x_t, x0, vocab_size)
-    loss = (sigma[:, None] * loss).mean(dim=-1).mean()
+
+    # Apply sigma weighting (derivative of noise schedule, required by theory)
+    # Shape: (B, L) -> (B,)
+    loss = (sigma[:, None] * loss).mean(dim=-1)
+
+    # Apply optional loss weighting by noise level
+    if loss_weight_mode != 'uniform':
+        weight = compute_loss_weight(sigma, mode=loss_weight_mode)  # Shape (B,)
+        loss = loss * weight
+
+    # Final batch average
+    loss = loss.mean()
 
     return loss
 
@@ -184,6 +197,7 @@ def train_model(
     log_interval = config['training']['log_interval']
     use_compile = config['training'].get('use_compile', False)  # Default to False for compatibility
     use_fused_adamw = config['training'].get('use_fused_adamw', True)  # Default to True for speed
+    loss_weight_mode = config['training'].get('loss_weight_mode', 'uniform')  # Default to uniform for backward compatibility
 
     # Paths
     models_dir = config['paths']['models_dir']
@@ -387,7 +401,8 @@ def train_model(
                     with torch.amp.autocast('cuda'):
                         loss = loss_function(
                             model, batch, noise, vocab_size,
-                            sampling_eps=config['noise']['sigma_min']
+                            sampling_eps=config['noise']['sigma_min'],
+                            loss_weight_mode=loss_weight_mode
                         )
 
                     optimizer.zero_grad()
@@ -397,7 +412,8 @@ def train_model(
                 else:
                     loss = loss_function(
                         model, batch, noise, vocab_size,
-                        sampling_eps=config['noise']['sigma_min']
+                        sampling_eps=config['noise']['sigma_min'],
+                        loss_weight_mode=loss_weight_mode
                     )
 
                     optimizer.zero_grad()
@@ -429,7 +445,8 @@ def train_model(
                     for batch in val_loader:
                         batch = batch.to(device)
                         loss = loss_function(model, batch, noise, vocab_size,
-                                           sampling_eps=config['noise']['sigma_min'])
+                                           sampling_eps=config['noise']['sigma_min'],
+                                           loss_weight_mode=loss_weight_mode)
                         val_loss += loss.item()
                         val_batches += 1
 
