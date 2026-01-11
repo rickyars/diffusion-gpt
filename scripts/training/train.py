@@ -292,16 +292,11 @@ def train_model(
     # Note: Requires Triton, may not work on Windows
     if use_compile and hasattr(torch, 'compile') and device.type == 'cuda':
         try:
-            print("Compiling model with torch.compile() (set use_compile: false in config to disable)...")
             model = torch.compile(model)
-            print("✓ Model compiled successfully - expect 30-50% faster training!")
         except Exception as e:
-            print(f"⚠ torch.compile() failed: {str(e)[:100]}")
-            print("  Set 'use_compile: false' in config.yaml to disable this attempt")
-            print("  Continuing with eager mode (slightly slower but works fine)")
-    elif not use_compile:
-        print("torch.compile() disabled (use_compile: false in config)")
-        print("Enable with 'use_compile: true' if you have Triton installed")
+            print(f"[WARN] torch.compile() failed: {str(e)[:100]}")
+            print(f"       Set 'use_compile: false' in config.yaml to disable")
+            use_compile = False
 
     # Check fused AdamW compatibility if requested
     if use_fused_adamw and device.type == 'cuda':
@@ -314,15 +309,12 @@ def train_model(
             test_scaler.scale(test_loss).backward()
             test_scaler.step(test_opt)
             test_scaler.update()
-            print("[ON]  Fused AdamW optimizer (5-8% speedup)")
         except (TypeError, RuntimeError, AssertionError) as e:
-            print(f"[OFF] Fused AdamW (incompatible: {str(e)[:60]})")
+            print(f"[WARN] Fused AdamW incompatible: {str(e)[:60]}")
             use_fused_adamw = False
     elif use_fused_adamw:
-        print("[OFF] Fused AdamW (requires CUDA)")
+        print(f"[WARN] Fused AdamW requires CUDA, using standard AdamW")
         use_fused_adamw = False
-    else:
-        print("[OFF] Fused AdamW")
 
     # Initialize optimizer
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, fused=use_fused_adamw)
@@ -349,14 +341,9 @@ def train_model(
     # Mixed precision training for faster computation
     # Use torch.amp.GradScaler instead of deprecated torch.cuda.amp.GradScaler
     scaler = torch.amp.GradScaler('cuda') if use_amp and device.type == 'cuda' else None
-    if use_amp:
-        if device.type != 'cuda':
-            print("[WARN] Mixed precision training requested but not available on CPU, disabling AMP")
-            use_amp = False
-        else:
-            print("[ON]  Mixed precision training (AMP)")
-    else:
-        print("[OFF] Mixed precision training (AMP)")
+    if use_amp and device.type != 'cuda':
+        print(f"[WARN] Mixed precision training requested but not available on CPU, disabling AMP")
+        use_amp = False
 
     # Initialize noise schedule
     noise = GeometricNoise(
