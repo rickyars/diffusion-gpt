@@ -197,6 +197,7 @@ def train_model(
     log_interval = config['training']['log_interval']
     use_compile = config['training'].get('use_compile', False)  # Default to False for compatibility
     use_fused_adamw = config['training'].get('use_fused_adamw', True)  # Default to True for speed
+    use_amp = config['training'].get('use_amp', device.type == 'cuda')  # Default to True on CUDA, False on CPU
     loss_weight_mode = config['training'].get('loss_weight_mode', 'uniform')  # Default to uniform for backward compatibility
 
     # Paths
@@ -346,11 +347,16 @@ def train_model(
                 print("[WARN] Could not load optimizer state, starting with fresh optimizer")
 
     # Mixed precision training for faster computation
-    use_amp = device.type == 'cuda'
     # Use torch.amp.GradScaler instead of deprecated torch.cuda.amp.GradScaler
-    scaler = torch.amp.GradScaler('cuda') if use_amp else None
+    scaler = torch.amp.GradScaler('cuda') if use_amp and device.type == 'cuda' else None
     if use_amp:
-        print("Using mixed precision training (AMP) for faster computation")
+        if device.type != 'cuda':
+            print("[WARN] Mixed precision training requested but not available on CPU, disabling AMP")
+            use_amp = False
+        else:
+            print("[ON]  Mixed precision training (AMP)")
+    else:
+        print("[OFF] Mixed precision training (AMP)")
 
     # Initialize noise schedule
     noise = GeometricNoise(
@@ -361,10 +367,23 @@ def train_model(
     # Training loop with graceful shutdown handling
     print("\nStarting training...")
     print("Press Ctrl+C to save progress and exit gracefully\n")
-    print(f"Training configuration:")
-    print(f"  Batches per epoch: {len(train_loader)}")
-    print(f"  Samples per epoch: {len(train_loader) * batch_size}")
-    print(f"  Total training steps: {len(train_loader) * epochs}")
+
+    # Display active training configuration
+    print("=" * 80)
+    print("TRAINING CONFIGURATION")
+    print("=" * 80)
+    print(f"Optimizer:")
+    print(f"  AdamW mode:              {'fused' if use_fused_adamw else 'standard'}")
+    print(f"Computation:")
+    print(f"  torch.compile:           {'enabled' if use_compile else 'disabled'}")
+    print(f"  Mixed precision (AMP):   {'enabled' if use_amp else 'disabled'}")
+    print(f"Loss:")
+    print(f"  Weighting mode:          {loss_weight_mode}")
+    print(f"Data:")
+    print(f"  Batches per epoch:       {len(train_loader)}")
+    print(f"  Samples per epoch:       {len(train_loader) * batch_size}")
+    print(f"  Total training steps:    {len(train_loader) * epochs}")
+    print("=" * 80)
     print()
     model.train()
 
