@@ -315,7 +315,21 @@ def train_model(
     # Load optimizer state if resuming
     if resume_from and os.path.exists(resume_from) and start_epoch > 0:
         checkpoint = torch.load(resume_from, map_location=device, weights_only=False)
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+        # Check for optimizer mode mismatch
+        checkpoint_optimizer_mode = checkpoint.get('optimizer_mode', 'standard')  # Old checkpoints default to standard
+        current_optimizer_mode = 'fused' if use_fused_adamw else 'standard'
+
+        if checkpoint_optimizer_mode != current_optimizer_mode:
+            print(f"[WARN] Optimizer mode mismatch:")
+            print(f"       Checkpoint was trained with: {checkpoint_optimizer_mode} AdamW")
+            print(f"       Current training uses: {current_optimizer_mode} AdamW")
+            print(f"       Optimizer state discarded (model weights preserved)")
+        else:
+            try:
+                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            except (RuntimeError, KeyError):
+                print("[WARN] Could not load optimizer state, starting with fresh optimizer")
 
     # Mixed precision training for faster computation
     use_amp = device.type == 'cuda'
@@ -434,6 +448,7 @@ def train_model(
                     'config': model_config.__dict__,
                     'vocab_size': vocab_size,
                     'loss': avg_train_loss,
+                    'optimizer_mode': 'fused' if use_fused_adamw else 'standard',
                 }
                 checkpoint_path = os.path.join(models_dir, f"{dataset_name}_epoch_{epoch+1}.pt")
                 torch.save(checkpoint, checkpoint_path)
@@ -460,6 +475,7 @@ def train_model(
             'config': model_config.__dict__,
             'vocab_size': vocab_size,
             'loss': avg_train_loss if num_batches > 0 else float('inf'),
+            'optimizer_mode': 'fused' if use_fused_adamw else 'standard',
         }
         interrupted_path = os.path.join(models_dir, f"{dataset_name}_interrupted_epoch_{epoch+1}.pt")
         torch.save(interrupted_checkpoint, interrupted_path)
@@ -474,6 +490,7 @@ def train_model(
             'config': model_config.__dict__,
             'vocab_size': vocab_size,
             'loss': avg_train_loss,
+            'optimizer_mode': 'fused' if use_fused_adamw else 'standard',
         }
         torch.save(final_checkpoint, model_path)
         print(f"\nTraining completed! Final model saved to: {model_path}")
