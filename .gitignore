@@ -27,6 +27,10 @@ wheels/
 *.pth
 *.pt
 
+# ONNX models (generated, not committed)
+*.onnx
+*.onnx.data
+
 # Training outputs
 models/*.pt
 models/*.pth
@@ -38,6 +42,9 @@ models/*
 !models/.gitkeep
 vocab/*
 !vocab/.gitkeep
+
+# WE art piece (generated HTML, keep template only)
+scripts/art-piece/we.html
 outputs/*
 !outputs/.gitkeep
 
