@@ -75,6 +75,20 @@ def export_model_to_onnx(model_path, dataset_name):
         verbose=False
     )
 
+    # Check if external data was created and merge it
+    data_path = f"{onnx_path}.data"
+    if os.path.exists(data_path):
+        print(f"\nEmbedding external data from {data_path}...")
+        try:
+            import onnx
+            onnx_model = onnx.load(onnx_path)
+            onnx.save(onnx_model, onnx_path)
+            # Remove external data file since it's now embedded
+            os.remove(data_path)
+            print("✓ External data embedded and merged")
+        except Exception as e:
+            print(f"Note: External data file exists. Run merge_onnx_data.py to merge: {e}")
+
     # Check ONNX file size
     onnx_size = os.path.getsize(onnx_path) / (1024 * 1024)
     print(f"ONNX model size: {onnx_size:.2f} MB")
@@ -290,5 +304,5 @@ if __name__ == '__main__':
     print("="*60)
     print(f"ONNX model: {model_path}")
     print(f"Vocabulary: {vocab_path}")
-    print("\nNext: Run merge_onnx_data.py if .onnx.data file exists")
-    print("Then: Run build.py --dataset {args.dataset} to create HTML")
+    print("\nNext: Run update_model.py to generate we.html")
+    print(f"  python scripts/art-piece/update_model.py --dataset {args.dataset}")
