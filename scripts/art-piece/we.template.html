@@ -107,27 +107,23 @@ const States = {
   WE_HOLD: 'WE_HOLD',
   WE_DISSOLVE: 'WE_DISSOLVE',
   CONF_GENERATING: 'CONF_GENERATING',
-  CONF_DIFFUSE: 'CONF_DIFFUSE',
   CONF_HOLD: 'CONF_HOLD',
   CONF_FADE: 'CONF_FADE'
 };
 
 // Diffusion configuration
 const DIFFUSION_CONFIG = {
-  TOTAL_STEPS: 128,      // Total denoising steps (quality)
-  DISPLAY_FRAMES: 64,    // Frames to actually display (performance)
-  // Frame skip = TOTAL_STEPS / DISPLAY_FRAMES (e.g., 128/64 = show every 2nd frame)
+  TOTAL_STEPS: 64,       // Total denoising steps
 };
 
 const TIMING = {
   VOID: 1000,  // Short initial pause
   WE_FADEIN: 1500,
   WE_HOLD: 2500,
-  WE_DISSOLVE: 2500,  // 2.5 seconds for extended glitching (was 1.2)
-  CONF_GENERATING: 500,
-  CONF_DIFFUSE: 4500,  // 4.5 seconds for 64 frames = ~14 FPS (slower, more visible)
-  CONF_HOLD: 25000,  // 25 seconds for comfortable reading
-  CONF_FADE: 6000  // 6 seconds slow fade
+  WE_DISSOLVE: 2500,  // 2.5 seconds for extended glitching
+  CONF_GENERATING: 500,  // Brief pause before starting generation (lets WE dissolve complete)
+  CONF_HOLD: 8000,  // 8 seconds for reading
+  CONF_FADE: 4000  // 4 seconds slow fade
 };
 
 class WEAttendApp {
@@ -286,15 +282,6 @@ class WEAttendApp {
         // Show loading message during buffering
         break;
 
-      case States.CONF_DIFFUSE:
-        // Start generating next confession in background during playback
-        if (!this.nextGenerationStarted && this.stateTime > 500) {
-          this.nextGenerationStarted = true;
-          this.startGeneration();
-        }
-        // Transition handled by render loop when playback completes
-        break;
-
       case States.CONF_HOLD:
         if (this.stateTime > TIMING.CONF_HOLD) {
           this.transitionTo(States.CONF_FADE);
@@ -304,18 +291,8 @@ class WEAttendApp {
 
       case States.CONF_FADE:
         if (this.stateTime > TIMING.CONF_FADE) {
-          // Check if we have next frames ready in buffer
-          if (this.nextFrames && this.nextFrames.length >= DIFFUSION_CONFIG.DISPLAY_FRAMES && !this.isBuffering) {
-            // Swap buffers and go straight to playback!
-            console.log('✓ Using pre-buffered frames!');
-            this.diffusionFrames = this.nextFrames;
-            this.nextFrames = [];
-            this.transitionTo(States.CONF_DIFFUSE);
-            this.playbackStartTime = performance.now();
-          } else {
-            // Need to generate
-            this.transitionTo(States.CONF_GENERATING);
-          }
+          // Fade complete - start next generation cycle
+          this.transitionTo(States.CONF_GENERATING);
         }
         break;
     }
@@ -334,26 +311,31 @@ class WEAttendApp {
     if (newState === States.CONF_GENERATING) {
       this.generationStarted = false;  // Reset for new generation cycle
       this.nextGenerationStarted = false;
+      this.currentConfession = null;  // Clear old confession to avoid brief reappearance
+      this.diffusionFrames = [];  // Also clear frames to ensure blank canvas
+      console.log('🔄 Transitioning to CONF_GENERATING: cleared currentConfession and diffusionFrames');
     }
   }
 
   async startGeneration() {
-    // If already buffering, don't interrupt - let it finish
+    // If already generating, don't interrupt - let it finish
     if (this.isBuffering) {
-      console.log('⏳ Already buffering, waiting for completion...');
+      console.log('⏳ Already generating, waiting for completion...');
       return;
     }
 
-    console.log(`▶ Starting generation: ${DIFFUSION_CONFIG.TOTAL_STEPS} steps, displaying ${DIFFUSION_CONFIG.DISPLAY_FRAMES} frames`);
+    console.log(`▶ Starting real-time generation: ${DIFFUSION_CONFIG.TOTAL_STEPS} steps`);
 
     try {
-      this.nextFrames = [];  // Buffer into nextFrames (don't clear current playback!)
+      this.diffusionFrames = [];  // Stream directly to display (real-time)
       this.frameCounter = 0;  // Track which step we're on
       this.isBuffering = true;
+      this.isGenerating = true;
       this.confessionGenerator = this.inferenceEngine.generateStream(256, DIFFUSION_CONFIG.TOTAL_STEPS);
+      this.playbackStartTime = performance.now();  // Start playback timer immediately
 
-      // Start buffering
-      this.bufferNextFrame();
+      // Start real-time generation loop
+      this.generateNextFrame();
 
     } catch (error) {
       console.error('✗ Generation failed:', error);
@@ -361,55 +343,42 @@ class WEAttendApp {
     }
   }
 
-  async bufferNextFrame() {
+  async generateNextFrame() {
     if (!this.confessionGenerator || !this.isBuffering) return;
 
     try {
       const result = await this.confessionGenerator.next();
 
       if (!result.done && this.isBuffering) {
-        // Calculate frame skip interval
-        const frameSkip = DIFFUSION_CONFIG.TOTAL_STEPS / DIFFUSION_CONFIG.DISPLAY_FRAMES;
+        // Stream frame directly to display - renders immediately
+        this.diffusionFrames.push(result.value.text);
 
-        // Only save frames at the right intervals (e.g., every 2nd frame if 128 steps / 64 display)
-        // Always include step 0 (initial noise) and final step
-        const shouldSave = this.frameCounter === 0 ||
-                          this.frameCounter === DIFFUSION_CONFIG.TOTAL_STEPS ||
-                          (this.frameCounter % Math.round(frameSkip)) === 0;
-
-        if (shouldSave) {
-          this.nextFrames.push(result.value.text);
-
-          // Log progress
-          const frameCount = this.nextFrames.length;
-          if (frameCount % 10 === 0 || frameCount < 5) {
-            console.log(`Buffered ${frameCount}/${DIFFUSION_CONFIG.DISPLAY_FRAMES} frames (step ${this.frameCounter}/${DIFFUSION_CONFIG.TOTAL_STEPS})...`);
-          }
+        // Log progress
+        const frameCount = this.diffusionFrames.length;
+        if (frameCount % 10 === 0 || frameCount < 5) {
+          console.log(`Generated ${frameCount} frames (step ${this.frameCounter}/${DIFFUSION_CONFIG.TOTAL_STEPS})...`);
         }
 
         this.frameCounter++;
 
-        // Yield to browser, then continue
-        setTimeout(() => this.bufferNextFrame(), 0);
+        // Continue immediately - let rendering happen naturally in loop()
+        setTimeout(() => this.generateNextFrame(), 0);
       } else {
-        // All frames buffered!
-        console.log(`✓ All ${this.nextFrames.length} frames buffered!`);
+        // Generation complete!
+        console.log(`✓ Generation complete! ${this.diffusionFrames.length} frames generated`);
         this.isBuffering = false;
+        this.isGenerating = false;
         this.confessionGenerator = null;
 
-        // If we're still in CONF_GENERATING state, swap buffers and start playback
+        // Transition to hold state immediately (show final text)
         if (this.state === States.CONF_GENERATING) {
-          console.log('Starting playback...');
-          this.diffusionFrames = this.nextFrames;
-          this.nextFrames = [];
-          this.transitionTo(States.CONF_DIFFUSE);
-          this.playbackStartTime = performance.now();
+          this.transitionTo(States.CONF_HOLD);
         }
-        // Otherwise nextFrames will be swapped in during CONF_FADE
       }
     } catch (error) {
-      console.error('✗ Frame buffering failed:', error);
+      console.error('✗ Generation failed:', error);
       this.isBuffering = false;
+      this.isGenerating = false;
     }
   }
 
@@ -417,7 +386,8 @@ class WEAttendApp {
     const w = window.innerWidth;
     const h = window.innerHeight;
 
-    // Clear
+    // Clear canvas completely (important for black background)
+    this.textCtx.clearRect(0, 0, w, h);
     this.textCtx.fillStyle = '#000';
     this.textCtx.fillRect(0, 0, w, h);
 
@@ -427,22 +397,30 @@ class WEAttendApp {
         break;
 
       case States.CONF_GENERATING:
-        // Show pulsing WE during buffering with blinking cursor
-        const bufferPulse = (Math.sin(time * 0.003) + 1) * 0.5; // 0-1 pulse
-        this.renderWE(0.7 + bufferPulse * 0.3, time); // Pulsing opacity 0.7-1.0
+        // Display generated frames in real-time as they're created
+        if (this.diffusionFrames && this.diffusionFrames.length > 0) {
+          // Show the latest frame while generating
+          const currentText = this.diffusionFrames[this.diffusionFrames.length - 1];
+          const prevText = this.diffusionFrames.length > 1
+            ? this.diffusionFrames[this.diffusionFrames.length - 2]
+            : null;
 
-        // Add blinking cursor next to WE
-        const cursorBlink = Math.floor(time / 500) % 2; // Blink every 500ms
-        if (cursorBlink) {
+          // Render with slight opacity pulse to show it's updating
+          const updatePulse = (Math.sin(time * 0.01) + 1) * 0.5;
+          const opacity = 0.85 + updatePulse * 0.15; // 0.85-1.0 pulse
+          this.renderConfession(currentText, opacity, prevText);
+
+          // Show step counter below the text
           this.textCtx.save();
-          this.textCtx.fillStyle = '#33ff33';
-          const fontSize = h * 0.2;
-          // Position cursor to right of WE
-          this.textCtx.font = `900 ${fontSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif`;
-          const weWidth = this.textCtx.measureText('WE').width;
-          this.textCtx.fillRect(w / 2 + weWidth / 2 + fontSize * 0.15, h / 2 - fontSize * 0.3, fontSize * 0.1, fontSize * 0.6);
+          this.textCtx.fillStyle = 'rgba(51, 255, 51, 0.5)';
+          this.textCtx.font = `${h * 0.02}px 'Courier New', monospace`;
+          this.textCtx.textAlign = 'center';
+          this.textCtx.textBaseline = 'top';
+          const stepText = `step ${this.frameCounter}/${DIFFUSION_CONFIG.TOTAL_STEPS}`;
+          this.textCtx.fillText(stepText, w / 2, h / 2 + h * 0.22);
           this.textCtx.restore();
         }
+        // Waiting for frames - ensure nothing is rendered (canvas already cleared black above)
         break;
 
       case States.WE_FADEIN:
@@ -457,33 +435,26 @@ class WEAttendApp {
         this.renderWEDissolve(this.stateTime / TIMING.WE_DISSOLVE);
         break;
 
-      case States.CONF_DIFFUSE:
-        // Play back buffered frames at controlled FPS
-        if (this.diffusionFrames && this.diffusionFrames.length > 0) {
-          const elapsed = performance.now() - this.playbackStartTime;
-          const targetDuration = TIMING.CONF_DIFFUSE;  // 1.5 seconds
-          const frameIndex = Math.floor((elapsed / targetDuration) * this.diffusionFrames.length);
-
-          if (frameIndex < this.diffusionFrames.length) {
-            this.renderConfession(this.diffusionFrames[frameIndex], 1.0);
-          } else {
-            // Playback finished - show final frame and transition
-            this.currentConfession = { text: this.diffusionFrames[this.diffusionFrames.length - 1] };
-            this.transitionTo(States.CONF_HOLD);
-          }
-        }
-        break;
-
       case States.CONF_HOLD:
-        if (this.currentConfession) {
-          this.renderConfession(this.currentConfession.text, 1.0);
+        // Show the final generated confession with highlighting
+        if (this.diffusionFrames && this.diffusionFrames.length > 0) {
+          const currentText = this.diffusionFrames[this.diffusionFrames.length - 1];
+          const prevText = this.diffusionFrames.length > 1
+            ? this.diffusionFrames[this.diffusionFrames.length - 2]
+            : null;
+          this.renderConfession(currentText, 1.0, prevText);
+          // Save for later use in CONF_FADE
+          this.currentConfession = { text: currentText };
         }
+        // Don't render old confession as fallback - just leave blank if no new frames
         break;
 
       case States.CONF_FADE:
         if (this.currentConfession) {
           const opacity = 1.0 - (this.stateTime / TIMING.CONF_FADE);
-          this.renderConfession(this.currentConfession.text, opacity);
+          if (opacity > 0) {
+            this.renderConfession(this.currentConfession.text, opacity);
+          }
         }
         break;
     }
@@ -545,6 +516,14 @@ class WEAttendApp {
     const fontSize = h * 0.2;  // Match larger WE size
     this.textCtx.font = `900 ${fontSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif`;
 
+    // Add glitch effect - same as WE_HOLD
+    const glitchIntensity = 0.005;
+    const glitchX = (Math.random() - 0.5) * glitchIntensity * w;
+    const glitchY = (Math.random() - 0.5) * glitchIntensity * h;
+
+    this.textCtx.shadowColor = '#33ff33';
+    this.textCtx.shadowBlur = fontSize * 0.3;
+
     let text = 'WE';
     // Much more aggressive glitching throughout the dissolve
     // Starts at 30% progress, increases frequency as we approach the end
@@ -556,11 +535,24 @@ class WEAttendApp {
     }
 
     this.textCtx.fillStyle = `rgba(51, 255, 51, ${opacity})`;
-    this.textCtx.fillText(text, w / 2, h / 2);
+
+    // Occasional RGB channel split glitch (same as WE_HOLD)
+    if (Math.random() < 0.05) {
+      // Draw red channel offset
+      this.textCtx.fillStyle = `rgba(255, 0, 0, ${opacity * 0.3})`;
+      this.textCtx.fillText(text, w / 2 - 2 + glitchX, h / 2 + glitchY);
+      // Draw blue channel offset
+      this.textCtx.fillStyle = `rgba(0, 0, 255, ${opacity * 0.3})`;
+      this.textCtx.fillText(text, w / 2 + 2 + glitchX, h / 2 + glitchY);
+      // Draw main green channel
+      this.textCtx.fillStyle = `rgba(51, 255, 51, ${opacity})`;
+    }
+
+    this.textCtx.fillText(text, w / 2 + glitchX, h / 2 + glitchY);
     this.textCtx.restore();
   }
 
-  renderConfession(text, opacity) {
+  renderConfession(text, opacity, prevText = null) {
     const w = window.innerWidth;
     const h = window.innerHeight;
 
@@ -594,6 +586,11 @@ class WEAttendApp {
     this.textCtx.fillStyle = `rgba(51, 255, 51, ${Math.min(1, opacity)})`;
     this.renderConfessionText(text, w, h, fontSize, glitchX, glitchY);
 
+    // Overlay highlighting for changed characters (yellow glow on changes)
+    if (prevText) {
+      this.renderHighlightChanges(text, prevText, w, h, fontSize, opacity, glitchX, glitchY);
+    }
+
     this.textCtx.restore();
   }
 
@@ -616,6 +613,47 @@ class WEAttendApp {
       const y = startY + i * lineHeight + lineHeight / 2;
       this.textCtx.fillText(line, w / 2 + offsetX, y + offsetY);
     });
+  }
+
+  renderHighlightChanges(text, prevText, w, h, fontSize, opacity, offsetX, offsetY) {
+    // Overlay yellow highlights on changed characters
+    const paddedText = text.padEnd(256, ' ').substring(0, 256);
+    const paddedPrev = prevText.padEnd(256, ' ').substring(0, 256);
+
+    const lines = [];
+    for (let i = 0; i < 256; i += 32) {
+      lines.push(paddedText.substring(i, i + 32));
+    }
+
+    // Calculate grid position (matches renderConfessionText layout)
+    const charWidth = this.textCtx.measureText('M').width;
+    const lineHeight = fontSize * 1.5;
+    const startY = h / 2 - (lineHeight * 3.5); // 8 lines centered, 3.5 from center
+
+    // Highlight changed characters with yellow glow
+    this.textCtx.save();
+    this.textCtx.fillStyle = `rgba(255, 255, 100, ${opacity * 0.7})`;
+    this.textCtx.shadowColor = '#ffff00';
+    this.textCtx.shadowBlur = fontSize * 0.8;
+    this.textCtx.textAlign = 'center';
+    this.textCtx.textBaseline = 'middle';
+    this.textCtx.font = `${fontSize}px 'Courier New', monospace`;
+
+    for (let i = 0; i < 256; i++) {
+      const char = paddedText[i];
+      const prevChar = paddedPrev[i];
+
+      // Only highlight if character changed
+      if (char !== prevChar && char !== ' ') {
+        const row = Math.floor(i / 32);
+        const col = i % 32;
+        const x = w / 2 + (col - 15.5) * charWidth + offsetX;
+        const y = startY + row * lineHeight + offsetY;
+        this.textCtx.fillText(char, x, y);
+      }
+    }
+
+    this.textCtx.restore();
   }
 
   renderWebGL() {
