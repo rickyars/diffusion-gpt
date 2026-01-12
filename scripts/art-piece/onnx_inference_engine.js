@@ -306,23 +306,14 @@ class DiffusionInferenceEngine {
             Math.floor(Math.random() * this.vocabSize)
         );
 
-        // Yield initial random state (step 0, before any denoising)
-        yield {
-            step: 0,
-            totalSteps: steps,
-            text: this.decode(x),
-            sigma: this.geometricNoise(1.0).sigmaBar,
-            isInitial: true
-        };
-
-        // Denoising loop
-        for (let i = 0; i <= steps; i++) {
-            const t = 1 - i * stepSize;
+        // Denoising loop (runs exactly 'steps' times, i from 0 to steps-1)
+        for (let i = 0; i < steps; i++) {
+            const t = 1 - (i + 1) * stepSize;
             const { sigmaBar: currSigmaBar } = this.geometricNoise(t);
 
             // Denoising step
             let deltaSigma;
-            if (i < steps) {
+            if (i < steps - 1) {
                 const { sigmaBar: nextSigmaBar } = this.geometricNoise(t - stepSize);
                 deltaSigma = currSigmaBar - nextSigmaBar;
             } else {

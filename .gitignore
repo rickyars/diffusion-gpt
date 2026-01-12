@@ -68,3 +68,4 @@ Thumbs.db
 venv/
 env/
 ENV/
+datasets/original/*.csv
