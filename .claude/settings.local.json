@@ -27,7 +27,8 @@
       "Bash(git add:*)",
       "Bash(tree:*)",
       "Bash(python:*)",
-      "Bash(git clone:*)"
+      "Bash(git clone:*)",
+      "Bash(git commit:*)"
     ]
   }
 }
