@@ -1,77 +1,17 @@
-"""
-Build the COMPLETE self-contained WE HTML file with:
-- ONNX model embedded
-- WebGL CRT post-processing
-- Web Audio soundscape
-- Proper diffusion animation (showing all 128 steps)
-"""
-
-import argparse
-import json
-import base64
-import os
-
-# Get project root (two directories up from this script)
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
-
-def load_vocab(dataset_name):
-    vocab_path = os.path.join(PROJECT_ROOT, 'vocab', f'{dataset_name}_vocab.json')
-    with open(vocab_path, 'r', encoding='utf-8') as f:
-        return json.load(f)
-
-def load_model_base64(model_path):
-    with open(model_path, 'rb') as f:
-        onnx_bytes = f.read()
-
-    return base64.b64encode(onnx_bytes).decode('utf-8')
-
-def build_complete_html(dataset_name, model_path):
-    print("Building COMPLETE WE HTML...")
-    print("="*60)
-    print(f"Dataset: {dataset_name}")
-    print(f"Model: {model_path}")
-    print("="*60)
-
-    print("Loading vocabulary...")
-    vocab = load_vocab(dataset_name)
-    vocab_json = json.dumps(vocab)
-
-    print("Loading ONNX model...")
-    model_b64 = load_model_base64(model_path)
-    model_size_mb = len(model_b64) / (1024 * 1024 * 1.33)
-    print(f"  Model size: {model_size_mb:.2f} MB")
-
-    model_config = {
-        "block_size": 256,
-        "vocab_size": 100,
-        "n_layer": 6,
-        "n_head": 6,
-        "n_embd": 384,
-        "cond_dim": 64
-    }
-
-    # Read component files
-    inference_js_path = os.path.join(SCRIPT_DIR, 'onnx_inference_engine.js')
-    with open(inference_js_path, 'r', encoding='utf-8') as f:
-        inference_js = f.read()
-
-    print("\nGenerating complete HTML with all features...")
-
-    html = f'''<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>WE</title>
   <style>
-    * {{
+    * {
       margin: 0;
       padding: 0;
       box-sizing: border-box;
-    }}
+    }
 
-    body, html {{
+    body, html {
       width: 100%;
       height: 100%;
       overflow: hidden;
@@ -79,9 +19,9 @@ def build_complete_html(dataset_name, model_path):
       font-family: 'Courier New', monospace;
       color: #33ff33;
       cursor: default;
-    }}
+    }
 
-    #textCanvas {{
+    #textCanvas {
       position: absolute;
       top: 0;
       left: 0;
@@ -89,9 +29,9 @@ def build_complete_html(dataset_name, model_path):
       height: 100%;
       display: none;
       z-index: 1;
-    }}
+    }
 
-    #glCanvas {{
+    #glCanvas {
       position: absolute;
       top: 0;
       left: 0;
@@ -99,9 +39,9 @@ def build_complete_html(dataset_name, model_path):
       height: 100%;
       display: block;
       z-index: 10;
-    }}
+    }
 
-    #overlay {{
+    #overlay {
       position: absolute;
       top: 50%;
       left: 50%;
@@ -113,15 +53,15 @@ def build_complete_html(dataset_name, model_path):
       padding: 2vmin;
       z-index: 100;
       transition: opacity 2s;
-    }}
+    }
 
-    #overlay.hidden {{
+    #overlay.hidden {
       opacity: 0;
-    }}
+    }
 
-    body.ready #overlay {{
+    body.ready #overlay {
       opacity: 0;
-    }}
+    }
   </style>
 </head>
 <body>
@@ -138,30 +78,30 @@ def build_complete_html(dataset_name, model_path):
 // EMBEDDED DATA
 // ============================================================================
 
-const MODEL_CONFIG = {json.dumps(model_config)};
-const VOCAB = {vocab_json};
-const MODEL_BASE64 = '{model_b64}';
+const MODEL_CONFIG = {{MODEL_CONFIG}};
+const VOCAB = {{VOCAB}};
+const MODEL_BASE64 = '{{MODEL_BASE64}}';
 
-function base64ToUint8Array(base64) {{
+function base64ToUint8Array(base64) {
   const binaryString = atob(base64);
   const bytes = new Uint8Array(binaryString.length);
-  for (let i = 0; i < binaryString.length; i++) {{
+  for (let i = 0; i < binaryString.length; i++) {
     bytes[i] = binaryString.charCodeAt(i);
-  }}
+  }
   return bytes;
-}}
+}
 
 // ============================================================================
 // INFERENCE ENGINE
 // ============================================================================
 
-{inference_js}
+{{INFERENCE_ENGINE}}
 
 // ============================================================================
 // MAIN APPLICATION
 // ============================================================================
 
-const States = {{
+const States = {
   VOID: 'VOID',
   WE_FADEIN: 'WE_FADEIN',
   WE_HOLD: 'WE_HOLD',
@@ -170,33 +110,40 @@ const States = {{
   CONF_DIFFUSE: 'CONF_DIFFUSE',
   CONF_HOLD: 'CONF_HOLD',
   CONF_FADE: 'CONF_FADE'
-}};
+};
 
-const TIMING = {{
+// Diffusion configuration
+const DIFFUSION_CONFIG = {
+  TOTAL_STEPS: 128,      // Total denoising steps (quality)
+  DISPLAY_FRAMES: 64,    // Frames to actually display (performance)
+  // Frame skip = TOTAL_STEPS / DISPLAY_FRAMES (e.g., 128/64 = show every 2nd frame)
+};
+
+const TIMING = {
   VOID: 1000,  // Short initial pause
   WE_FADEIN: 1500,
-  WE_HOLD: 2500,  // Shorter WE hold
-  WE_DISSOLVE: 1200,
+  WE_HOLD: 2500,
+  WE_DISSOLVE: 2500,  // 2.5 seconds for extended glitching (was 1.2)
   CONF_GENERATING: 500,
-  CONF_DIFFUSE: 3000,  // 3 seconds for fast visual effect
-  CONF_HOLD: 15000,  // 15 seconds for comfortable reading
-  CONF_FADE: 3500
-}};
+  CONF_DIFFUSE: 4500,  // 4.5 seconds for 64 frames = ~14 FPS (slower, more visible)
+  CONF_HOLD: 25000,  // 25 seconds for comfortable reading
+  CONF_FADE: 6000  // 6 seconds slow fade
+};
 
-class WEAttendApp {{
-  constructor() {{
+class WEAttendApp {
+  constructor() {
     this.textCanvas = document.getElementById('textCanvas');
     this.glCanvas = document.getElementById('glCanvas');
     this.textCtx = this.textCanvas.getContext('2d');
 
     // WebGL 2.0 only (required for CRT effects)
-    this.gl = this.glCanvas.getContext('webgl2', {{ alpha: false, antialias: false }});
+    this.gl = this.glCanvas.getContext('webgl2', { alpha: false, antialias: false });
 
-    if (!this.gl) {{
+    if (!this.gl) {
       console.error('WebGL 2.0 not supported - CRT effects will be disabled');
-    }} else {{
+    } else {
       console.log('Using WebGL 2.0');
-    }}
+    }
 
     this.state = States.VOID;
     this.stateTime = 0;
@@ -206,12 +153,17 @@ class WEAttendApp {{
     this.currentConfession = null;
     this.confessionGenerator = null;
 
+    // Double buffering for smooth looping
+    this.diffusionFrames = [];  // Currently playing frames
+    this.nextFrames = [];  // Next generation buffer
+    this.isBuffering = false;
+
     this.modelLoaded = false;
     this.firstInteraction = false;
     this.webglReady = false;
-  }}
+  }
 
-  async init() {{
+  async init() {
     console.log('WE - Initializing...');
 
     this.resize();
@@ -227,13 +179,13 @@ class WEAttendApp {{
 
     // Start animation loop immediately
     requestAnimationFrame((t) => this.loop(t));
-  }}
+  }
 
-  async loadModel() {{
-    try {{
+  async loadModel() {
+    try {
       console.log('Decoding model base64...');
       const modelBytes = base64ToUint8Array(MODEL_BASE64);
-      console.log(`Model bytes: ${{modelBytes.length}} bytes`);
+      console.log(`Model bytes: ${modelBytes.length} bytes`);
 
       console.log('Initializing inference engine...');
       this.inferenceEngine = new DiffusionInferenceEngine(
@@ -246,14 +198,14 @@ class WEAttendApp {{
 
       this.modelLoaded = true;
       console.log('✓ Model loaded successfully!');
-    }} catch (error) {{
+    } catch (error) {
       console.error('✗ Model load failed:', error);
       document.getElementById('overlay').textContent = 'ERROR: ' + error.message;
       // Keep overlay visible on error
-    }}
-  }}
+    }
+  }
 
-  resize() {{
+  resize() {
     const w = window.innerWidth;
     const h = window.innerHeight;
     const dpr = window.devicePixelRatio || 1;
@@ -269,149 +221,199 @@ class WEAttendApp {{
     this.glCanvas.style.width = w + 'px';
     this.glCanvas.style.height = h + 'px';
 
-    if (this.gl) {{
+    if (this.gl) {
       this.gl.viewport(0, 0, this.glCanvas.width, this.glCanvas.height);
-    }}
-  }}
+    }
+  }
 
-  loop(time) {{
+  loop(time) {
     const deltaTime = time - this.lastTime;
     this.lastTime = time;
 
-    if (!this.modelLoaded || !this.firstInteraction) {{
-      if (!this._loggedBlocked) {{
-        console.log(`Loop blocked: modelLoaded=${{this.modelLoaded}}, firstInteraction=${{this.firstInteraction}}`);
+    if (!this.modelLoaded || !this.firstInteraction) {
+      if (!this._loggedBlocked) {
+        console.log(`Loop blocked: modelLoaded=${this.modelLoaded}, firstInteraction=${this.firstInteraction}`);
         this._loggedBlocked = true;
-      }}
+      }
       requestAnimationFrame((t) => this.loop(t));
       return;
-    }}
+    }
 
-    if (!this._loggedRunning) {{
+    if (!this._loggedRunning) {
       console.log('✓ Render loop running');
       this._loggedRunning = true;
-    }}
+    }
 
     this.updateState(deltaTime);
     this.render(time);
 
     requestAnimationFrame((t) => this.loop(t));
-  }}
+  }
 
-  updateState(deltaTime) {{
+  updateState(deltaTime) {
     this.stateTime += deltaTime;
 
-    switch (this.state) {{
+    switch (this.state) {
       case States.VOID:
-        if (this.stateTime > TIMING.VOID) {{
+        if (this.stateTime > TIMING.VOID) {
           this.transitionTo(States.WE_FADEIN);
-        }}
+        }
         break;
 
       case States.WE_FADEIN:
-        if (this.stateTime > TIMING.WE_FADEIN) {{
+        if (this.stateTime > TIMING.WE_FADEIN) {
           this.transitionTo(States.WE_HOLD);
-        }}
+        }
         break;
 
       case States.WE_HOLD:
-        if (this.stateTime > TIMING.WE_HOLD) {{
+        if (this.stateTime > TIMING.WE_HOLD) {
           this.transitionTo(States.WE_DISSOLVE);
-        }}
+        }
         break;
 
       case States.WE_DISSOLVE:
-        if (this.stateTime > TIMING.WE_DISSOLVE) {{
+        if (this.stateTime > TIMING.WE_DISSOLVE) {
           this.transitionTo(States.CONF_GENERATING);
-        }}
+        }
         break;
 
       case States.CONF_GENERATING:
-        if (!this.confessionGenerator && this.stateTime > 300) {{
+        if (!this.generationStarted && this.stateTime > 300) {
+          this.generationStarted = true;
           this.startGeneration();
-        }}
+        }
+        // Show loading message during buffering
         break;
 
       case States.CONF_DIFFUSE:
-        if (this.stateTime > TIMING.CONF_DIFFUSE) {{
-          this.transitionTo(States.CONF_HOLD);
-        }}
+        // Start generating next confession in background during playback
+        if (!this.nextGenerationStarted && this.stateTime > 500) {
+          this.nextGenerationStarted = true;
+          this.startGeneration();
+        }
+        // Transition handled by render loop when playback completes
         break;
 
       case States.CONF_HOLD:
-        if (this.stateTime > TIMING.CONF_HOLD) {{
+        if (this.stateTime > TIMING.CONF_HOLD) {
           this.transitionTo(States.CONF_FADE);
-        }}
+        }
+        // Don't start new generation - let current one finish if still running
         break;
 
       case States.CONF_FADE:
-        if (this.stateTime > TIMING.CONF_FADE) {{
-          this.transitionTo(States.VOID);
-        }}
+        if (this.stateTime > TIMING.CONF_FADE) {
+          // Check if we have next frames ready in buffer
+          if (this.nextFrames && this.nextFrames.length >= DIFFUSION_CONFIG.DISPLAY_FRAMES && !this.isBuffering) {
+            // Swap buffers and go straight to playback!
+            console.log('✓ Using pre-buffered frames!');
+            this.diffusionFrames = this.nextFrames;
+            this.nextFrames = [];
+            this.transitionTo(States.CONF_DIFFUSE);
+            this.playbackStartTime = performance.now();
+          } else {
+            // Need to generate
+            this.transitionTo(States.CONF_GENERATING);
+          }
+        }
         break;
-    }}
-  }}
+    }
+  }
 
-  transitionTo(newState) {{
-    console.log(`${{this.state}} -> ${{newState}}`);
+  transitionTo(newState) {
+    console.log(`${this.state} -> ${newState}`);
     this.state = newState;
     this.stateTime = 0;
 
-    if (newState === States.VOID) {{
+    if (newState === States.VOID) {
       this.currentConfession = null;
       this.confessionGenerator = null;
-    }}
-  }}
+    }
 
-  async startGeneration() {{
-    console.log('▶ Starting confession generation...');
+    if (newState === States.CONF_GENERATING) {
+      this.generationStarted = false;  // Reset for new generation cycle
+      this.nextGenerationStarted = false;
+    }
+  }
 
-    try {{
-      this.confessionGenerator = this.inferenceEngine.generateStream(256, 128);
-      console.log('✓ Generator created, starting diffusion...');
-
-      // Immediately transition to diffuse and start rendering
-      this.transitionTo(States.CONF_DIFFUSE);
-      this.advanceGeneration();
-
-    }} catch (error) {{
-      console.error('✗ Generation start failed:', error);
-    }}
-  }}
-
-  async advanceGeneration() {{
-    if (!this.confessionGenerator) {{
-      console.error('✗ No generator!');
+  async startGeneration() {
+    // If already buffering, don't interrupt - let it finish
+    if (this.isBuffering) {
+      console.log('⏳ Already buffering, waiting for completion...');
       return;
-    }}
+    }
 
-    try {{
+    console.log(`▶ Starting generation: ${DIFFUSION_CONFIG.TOTAL_STEPS} steps, displaying ${DIFFUSION_CONFIG.DISPLAY_FRAMES} frames`);
+
+    try {
+      this.nextFrames = [];  // Buffer into nextFrames (don't clear current playback!)
+      this.frameCounter = 0;  // Track which step we're on
+      this.isBuffering = true;
+      this.confessionGenerator = this.inferenceEngine.generateStream(256, DIFFUSION_CONFIG.TOTAL_STEPS);
+
+      // Start buffering
+      this.bufferNextFrame();
+
+    } catch (error) {
+      console.error('✗ Generation failed:', error);
+      this.isBuffering = false;
+    }
+  }
+
+  async bufferNextFrame() {
+    if (!this.confessionGenerator || !this.isBuffering) return;
+
+    try {
       const result = await this.confessionGenerator.next();
 
-      if (!result.done) {{
-        this.currentConfession = result.value;
+      if (!result.done && this.isBuffering) {
+        // Calculate frame skip interval
+        const frameSkip = DIFFUSION_CONFIG.TOTAL_STEPS / DIFFUSION_CONFIG.DISPLAY_FRAMES;
 
-        // Log progress
-        if (result.value.step < 5 || result.value.step % 20 === 0) {{
-          console.log(`Step ${{result.value.step}}/${{result.value.totalSteps}}`);
-        }}
+        // Only save frames at the right intervals (e.g., every 2nd frame if 128 steps / 64 display)
+        // Always include step 0 (initial noise) and final step
+        const shouldSave = this.frameCounter === 0 ||
+                          this.frameCounter === DIFFUSION_CONFIG.TOTAL_STEPS ||
+                          (this.frameCounter % Math.round(frameSkip)) === 0;
 
-        // Continue immediately - let inference happen in parallel with rendering
-        // Generate steps as fast as possible, rendering will happen at 60fps
-        setTimeout(() => this.advanceGeneration(), 0);
+        if (shouldSave) {
+          this.nextFrames.push(result.value.text);
 
-      }} else {{
-        console.log('✓ Generation complete');
-        // Auto-transition to hold state when generation completes
-        this.transitionTo(States.CONF_HOLD);
-      }}
+          // Log progress
+          const frameCount = this.nextFrames.length;
+          if (frameCount % 10 === 0 || frameCount < 5) {
+            console.log(`Buffered ${frameCount}/${DIFFUSION_CONFIG.DISPLAY_FRAMES} frames (step ${this.frameCounter}/${DIFFUSION_CONFIG.TOTAL_STEPS})...`);
+          }
+        }
 
-    }} catch (error) {{
-      console.error('✗ Generation step failed:', error);
-    }}
-  }}
+        this.frameCounter++;
 
-  render(time) {{
+        // Yield to browser, then continue
+        setTimeout(() => this.bufferNextFrame(), 0);
+      } else {
+        // All frames buffered!
+        console.log(`✓ All ${this.nextFrames.length} frames buffered!`);
+        this.isBuffering = false;
+        this.confessionGenerator = null;
+
+        // If we're still in CONF_GENERATING state, swap buffers and start playback
+        if (this.state === States.CONF_GENERATING) {
+          console.log('Starting playback...');
+          this.diffusionFrames = this.nextFrames;
+          this.nextFrames = [];
+          this.transitionTo(States.CONF_DIFFUSE);
+          this.playbackStartTime = performance.now();
+        }
+        // Otherwise nextFrames will be swapped in during CONF_FADE
+      }
+    } catch (error) {
+      console.error('✗ Frame buffering failed:', error);
+      this.isBuffering = false;
+    }
+  }
+
+  render(time) {
     const w = window.innerWidth;
     const h = window.innerHeight;
 
@@ -420,9 +422,27 @@ class WEAttendApp {{
     this.textCtx.fillRect(0, 0, w, h);
 
     // Render text based on state
-    switch (this.state) {{
+    switch (this.state) {
       case States.VOID:
+        break;
+
       case States.CONF_GENERATING:
+        // Show pulsing WE during buffering with blinking cursor
+        const bufferPulse = (Math.sin(time * 0.003) + 1) * 0.5; // 0-1 pulse
+        this.renderWE(0.7 + bufferPulse * 0.3, time); // Pulsing opacity 0.7-1.0
+
+        // Add blinking cursor next to WE
+        const cursorBlink = Math.floor(time / 500) % 2; // Blink every 500ms
+        if (cursorBlink) {
+          this.textCtx.save();
+          this.textCtx.fillStyle = '#33ff33';
+          const fontSize = h * 0.2;
+          // Position cursor to right of WE
+          this.textCtx.font = `900 ${fontSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif`;
+          const weWidth = this.textCtx.measureText('WE').width;
+          this.textCtx.fillRect(w / 2 + weWidth / 2 + fontSize * 0.15, h / 2 - fontSize * 0.3, fontSize * 0.1, fontSize * 0.6);
+          this.textCtx.restore();
+        }
         break;
 
       case States.WE_FADEIN:
@@ -438,30 +458,41 @@ class WEAttendApp {{
         break;
 
       case States.CONF_DIFFUSE:
-        if (this.currentConfession) {{
-          this.renderConfession(this.currentConfession.text, 1.0);
-        }}
+        // Play back buffered frames at controlled FPS
+        if (this.diffusionFrames && this.diffusionFrames.length > 0) {
+          const elapsed = performance.now() - this.playbackStartTime;
+          const targetDuration = TIMING.CONF_DIFFUSE;  // 1.5 seconds
+          const frameIndex = Math.floor((elapsed / targetDuration) * this.diffusionFrames.length);
+
+          if (frameIndex < this.diffusionFrames.length) {
+            this.renderConfession(this.diffusionFrames[frameIndex], 1.0);
+          } else {
+            // Playback finished - show final frame and transition
+            this.currentConfession = { text: this.diffusionFrames[this.diffusionFrames.length - 1] };
+            this.transitionTo(States.CONF_HOLD);
+          }
+        }
         break;
 
       case States.CONF_HOLD:
-        if (this.currentConfession) {{
+        if (this.currentConfession) {
           this.renderConfession(this.currentConfession.text, 1.0);
-        }}
+        }
         break;
 
       case States.CONF_FADE:
-        if (this.currentConfession) {{
+        if (this.currentConfession) {
           const opacity = 1.0 - (this.stateTime / TIMING.CONF_FADE);
           this.renderConfession(this.currentConfession.text, opacity);
-        }}
+        }
         break;
-    }}
+    }
 
     // Copy to WebGL (simple passthrough for now)
     this.renderWebGL();
-  }}
+  }
 
-  renderWE(opacity, time) {{
+  renderWE(opacity, time) {
     const w = window.innerWidth;
     const h = window.innerHeight;
 
@@ -477,32 +508,32 @@ class WEAttendApp {{
     this.textCtx.textAlign = 'center';
     this.textCtx.textBaseline = 'middle';
 
-    const fontSize = h * 0.05;  // Smaller text
-    this.textCtx.font = `bold ${{fontSize}}px 'Courier New', monospace`;
+    const fontSize = h * 0.2;  // Large, prominent text
+    this.textCtx.font = `900 ${fontSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif`;
 
     this.textCtx.shadowColor = '#33ff33';
     this.textCtx.shadowBlur = fontSize * 0.3;
 
     const alpha = Math.min(1.0, opacity * brightness);
-    this.textCtx.fillStyle = `rgba(51, 255, 51, ${{alpha}})`;
+    this.textCtx.fillStyle = `rgba(51, 255, 51, ${alpha})`;
 
     // Occasional RGB channel split glitch
-    if (this.state === States.WE_HOLD && Math.random() < 0.05) {{
+    if (this.state === States.WE_HOLD && Math.random() < 0.05) {
       // Draw red channel offset
-      this.textCtx.fillStyle = `rgba(255, 0, 0, ${{alpha * 0.3}})`;
+      this.textCtx.fillStyle = `rgba(255, 0, 0, ${alpha * 0.3})`;
       this.textCtx.fillText('WE', w / 2 - 2 + glitchX, h / 2 + glitchY);
       // Draw blue channel offset
-      this.textCtx.fillStyle = `rgba(0, 0, 255, ${{alpha * 0.3}})`;
+      this.textCtx.fillStyle = `rgba(0, 0, 255, ${alpha * 0.3})`;
       this.textCtx.fillText('WE', w / 2 + 2 + glitchX, h / 2 + glitchY);
       // Draw main green channel
-      this.textCtx.fillStyle = `rgba(51, 255, 51, ${{alpha}})`;
-    }}
+      this.textCtx.fillStyle = `rgba(51, 255, 51, ${alpha})`;
+    }
 
     this.textCtx.fillText('WE', w / 2 + glitchX, h / 2 + glitchY);
     this.textCtx.restore();
-  }}
+  }
 
-  renderWEDissolve(progress) {{
+  renderWEDissolve(progress) {
     const w = window.innerWidth;
     const h = window.innerHeight;
     const opacity = 1.0 - progress;
@@ -511,22 +542,25 @@ class WEAttendApp {{
     this.textCtx.textAlign = 'center';
     this.textCtx.textBaseline = 'middle';
 
-    const fontSize = h * 0.05;  // Match smaller WE size
-    this.textCtx.font = `bold ${{fontSize}}px 'Courier New', monospace`;
+    const fontSize = h * 0.2;  // Match larger WE size
+    this.textCtx.font = `900 ${fontSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif`;
 
     let text = 'WE';
-    if (progress > 0.6 && Math.random() > 0.7) {{
-      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%';
+    // Much more aggressive glitching throughout the dissolve
+    // Starts at 30% progress, increases frequency as we approach the end
+    const glitchThreshold = 1.0 - (progress * 2.0);  // More glitching as progress increases
+    if (progress > 0.3 && Math.random() > glitchThreshold) {
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*';
       text = chars[Math.floor(Math.random() * chars.length)] +
              chars[Math.floor(Math.random() * chars.length)];
-    }}
+    }
 
-    this.textCtx.fillStyle = `rgba(51, 255, 51, ${{opacity}})`;
+    this.textCtx.fillStyle = `rgba(51, 255, 51, ${opacity})`;
     this.textCtx.fillText(text, w / 2, h / 2);
     this.textCtx.restore();
-  }}
+  }
 
-  renderConfession(text, opacity) {{
+  renderConfession(text, opacity) {
     const w = window.innerWidth;
     const h = window.innerHeight;
 
@@ -534,52 +568,72 @@ class WEAttendApp {{
     this.textCtx.textAlign = 'center';
     this.textCtx.textBaseline = 'middle';
 
-    const fontSize = Math.max(14, h * 0.02);
-    this.textCtx.font = `${{fontSize}}px 'Courier New', monospace`;
+    const fontSize = Math.max(18, h * 0.028);  // Increased from 0.02 to 0.028 (40% larger)
+    this.textCtx.font = `${fontSize}px 'Courier New', monospace`;
 
     this.textCtx.shadowColor = '#33ff33';
     this.textCtx.shadowBlur = fontSize * 0.25;
 
-    this.textCtx.fillStyle = `rgba(51, 255, 51, ${{Math.min(1, opacity)}})`;
+    // Add subtle glitch jitter to confession text
+    const glitchIntensity = 0.003;
+    const glitchX = (Math.random() - 0.5) * glitchIntensity * w;
+    const glitchY = (Math.random() - 0.5) * glitchIntensity * h;
 
+    // Occasional RGB channel split (5% chance per frame)
+    if (Math.random() < 0.05) {
+      // Draw red channel offset
+      this.textCtx.fillStyle = `rgba(255, 0, 0, ${Math.min(1, opacity) * 0.3})`;
+      this.renderConfessionText(text, w, h, fontSize, glitchX - 2, glitchY);
+
+      // Draw blue channel offset
+      this.textCtx.fillStyle = `rgba(0, 0, 255, ${Math.min(1, opacity) * 0.3})`;
+      this.renderConfessionText(text, w, h, fontSize, glitchX + 2, glitchY);
+    }
+
+    // Draw main green channel
+    this.textCtx.fillStyle = `rgba(51, 255, 51, ${Math.min(1, opacity)})`;
+    this.renderConfessionText(text, w, h, fontSize, glitchX, glitchY);
+
+    this.textCtx.restore();
+  }
+
+  renderConfessionText(text, w, h, fontSize, offsetX, offsetY) {
     // Fixed grid: 8 lines × 32 characters (256 total)
     // Pad or truncate text to exactly 256 characters
     const paddedText = text.padEnd(256, ' ').substring(0, 256);
     const lines = [];
 
-    for (let i = 0; i < 8; i++) {{
+    for (let i = 0; i < 8; i++) {
       lines.push(paddedText.substring(i * 32, (i + 1) * 32));
-    }}
+    }
 
     // Render centered grid
     const lineHeight = fontSize * 1.5;
     const totalHeight = 8 * lineHeight;
     const startY = (h - totalHeight) / 2;
 
-    lines.forEach((line, i) => {{
+    lines.forEach((line, i) => {
       const y = startY + i * lineHeight + lineHeight / 2;
-      this.textCtx.fillText(line, w / 2, y);
-    }});
+      this.textCtx.fillText(line, w / 2 + offsetX, y + offsetY);
+    });
+  }
 
-    this.textCtx.restore();
-  }}
-
-  renderWebGL() {{
-    if (!this.webglReady) {{
+  renderWebGL() {
+    if (!this.webglReady) {
       this.initWebGL();
-    }}
+    }
 
-    if (!this.webglReady) {{
+    if (!this.webglReady) {
       // WebGL 2.0 failed - fall back to showing text canvas directly
-      if (this.textCanvas.style.display === 'none') {{
+      if (this.textCanvas.style.display === 'none') {
         console.warn('WebGL 2.0 not available. Falling back to direct canvas rendering.');
         console.warn('For best experience, use a browser that supports WebGL 2.0.');
         this.textCanvas.style.display = 'block';
         this.textCanvas.style.zIndex = '10';
         this.glCanvas.style.display = 'none';
-      }}
+      }
       return;
-    }}
+    }
 
     const gl = this.gl;
 
@@ -652,19 +706,19 @@ class WEAttendApp {{
 
     gl.bindVertexArray(this.vao);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-  }}
+  }
 
-  initWebGL() {{
+  initWebGL() {
     const gl = this.gl;
 
-    if (!gl) {{
+    if (!gl) {
       console.error('WebGL 2.0 not supported. CRT effects will be disabled.');
       console.error('Browser/GPU must support WebGL 2.0 for visual effects.');
       this.webglReady = false;
       return;
-    }}
+    }
 
-    try {{
+    try {
       console.log('Initializing WebGL CRT effects...');
 
     // WebGL 2.0 vertex shader (GLSL ES 3.00)
@@ -672,11 +726,11 @@ class WEAttendApp {{
       in vec2 aPosition;
       out vec2 vUV;
 
-      void main() {{
+      void main() {
         vUV = aPosition * 0.5 + 0.5;
         vUV.y = 1.0 - vUV.y;  // Flip Y-axis for Canvas texture
         gl_Position = vec4(aPosition, 0.0, 1.0);
-      }}
+      }
     `;
 
     // Bright pass shader (extract bright areas for bloom)
@@ -690,7 +744,7 @@ class WEAttendApp {{
       uniform vec2 uResolution;
       uniform float uTime;
 
-      void main() {{
+      void main() {
         vec4 color = texture(uTexture, vUV);
 
         // Extract bright green channel (phosphor glow)
@@ -702,7 +756,7 @@ class WEAttendApp {{
 
         // Keep green channel for phosphor effect
         fragColor = vec4(color.rgb * bloomIntensity * 2.0, 1.0);
-      }}
+      }
     `;
 
     // Gaussian blur shader (separable)
@@ -716,7 +770,7 @@ class WEAttendApp {{
       uniform vec2 uResolution;
       uniform vec2 uDirection;
 
-      void main() {{
+      void main() {
         vec2 texelSize = 1.0 / uResolution;
 
         // 9-tap Gaussian blur
@@ -733,7 +787,7 @@ class WEAttendApp {{
         color += texture(uTexture, vUV - uDirection * texelSize * 4.0) * 0.016216;
 
         fragColor = color;
-      }}
+      }
     `;
 
     // CRT composite shader
@@ -749,152 +803,223 @@ class WEAttendApp {{
       uniform float uTime;
 
       // Random noise function
-      float random(vec2 st) {{
+      float random(vec2 st) {
         return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);
-      }}
+      }
 
-      // Barrel distortion
-      vec2 barrelDistortion(vec2 uv, float amount) {{
+      // Better noise with time animation
+      float animatedNoise(vec2 uv, float time) {
+        vec2 noiseCoord = uv * 1.5 + vec2(time * 0.05, time * 0.03);
+        return random(noiseCoord);
+      }
+
+      // Barrel distortion with aspect ratio correction
+      vec2 barrelDistortion(vec2 uv, float amount) {
         vec2 cc = uv - 0.5;
-        float dist = dot(cc, cc);
-        return uv + cc * dist * amount;
-      }}
+        float aspectRatio = uResolution.x / uResolution.y;
+        vec2 ccCorrected = cc;
+        if (aspectRatio > 1.0) {
+          ccCorrected.x /= aspectRatio;
+        } else {
+          ccCorrected.y *= aspectRatio;
+        }
+        float dist = dot(ccCorrected, ccCorrected);
+        return uv + cc * (1.0 + dist) * dist * amount;
+      }
 
-      // Scanlines
-      float scanline(vec2 uv) {{
-        float line = sin(uv.y * uResolution.y * 1.5);
+      // RGB subpixel scanlines (authentic CRT look) - MORE VISIBLE
+      vec3 applyScanlines(vec3 color, vec2 uv) {
+        float scanlineCount = uResolution.y * 0.75;
+        float scanlinePos = uv.y * scanlineCount;
 
-        // Subtle flicker
-        float flicker = sin(uTime * 12.0 + uv.y * 100.0) * 0.02;
+        // Primary scanline effect - MUCH MORE PRONOUNCED
+        float scanlinePattern = sin(scanlinePos * 3.14159 * 2.0);
+        float scanlineMask = smoothstep(-0.3, 0.3, scanlinePattern);
+        float scanlineEffect = mix(0.5, 1.0, scanlineMask);  // Darker scanlines (was 0.85)
 
-        return 1.0 - (line * 0.04 + flicker);
-      }}
+        // RGB subpixel pattern - MORE VISIBLE
+        vec3 subpixelOffsets = vec3(3.14159) * vec3(0.5, 0.5 - 2.0/3.0, 0.5 - 4.0/3.0);
+        float pixelCount = uResolution.x * 0.5;  // More visible pixels
+        vec3 xfactors = (2.5 + sin(uv.x * pixelCount * 3.14159 * 2.0 + subpixelOffsets)) / 3.5;
+
+        return color * scanlineEffect * xfactors;
+      }
+
+      // Phosphor glow effect - MUCH STRONGER
+      vec3 applyPhosphorGlow(vec3 color, vec3 bloom) {
+        // Green phosphor tint
+        vec3 phosphorColor = vec3(0.2, 1.0, 0.3);
+        float grey = dot(bloom, vec3(0.21, 0.72, 0.04));
+        vec3 tintedBloom = phosphorColor * grey;
+        // MASSIVELY increased glow: 3x bloom + 4x tinted bloom
+        return color + tintedBloom * 4.0 + bloom * 3.0;
+      }
+
+      // Horizontal sync distortion (subtle glitch)
+      vec2 horizontalSync(vec2 uv, float time) {
+        float syncLine = floor(uv.y * 20.0);
+        float syncTime = time * 3.0 + syncLine * 0.5;
+        float syncRandom = random(vec2(syncLine, floor(time * 2.0)));
+
+        // Occasional sync glitches
+        if (syncRandom > 0.97) {
+          float distortion = sin(syncTime * 10.0) * 0.01;
+          return vec2(uv.x + distortion, uv.y);
+        }
+
+        return uv;
+      }
 
       // Vignette
-      float vignette(vec2 uv) {{
+      float vignette(vec2 uv) {
         vec2 centered = (uv - 0.5) * 2.0;
         float dist = length(centered);
         return 1.0 - smoothstep(0.5, 1.5, dist);
-      }}
+      }
 
-      void main() {{
+      void main() {
         vec2 uv = vUV;
 
-        // Apply subtle barrel distortion
-        vec2 distortedUV = barrelDistortion(uv, 0.08);
+        // Pre-scale UV to compensate for barrel distortion edges
+        // This ensures content fills the screen even with distortion
+        float distortionAmount = 0.25;
+        vec2 scaledUV = (uv - 0.5) * 0.92 + 0.5;  // Scale down to fit after distortion
 
-        // Check if outside bounds after distortion
-        if (distortedUV.x < 0.0 || distortedUV.x > 1.0 ||
-            distortedUV.y < 0.0 || distortedUV.y > 1.0) {{
-          fragColor = vec4(0.0, 0.0, 0.0, 1.0);
-          return;
-        }}
+        // Apply barrel distortion - MORE VISIBLE
+        vec2 distortedUV = barrelDistortion(scaledUV, distortionAmount);
 
-        // Chromatic aberration (inline)
-        vec2 centered = distortedUV - 0.5;
+        // Clamp to bounds instead of hard cutoff for smoother edges
+        distortedUV = clamp(distortedUV, 0.0, 1.0);
+
+        // Apply horizontal sync distortion
+        vec2 syncUV = horizontalSync(distortedUV, uTime);
+
+        // Chromatic aberration (stronger effect)
+        vec2 centered = syncUV - 0.5;
         float dist = length(centered);
-        float amount = dist * 0.006;
+        float amount = dist * 0.008;
         vec2 direction = normalize(centered);
 
-        float r = texture(uTexture, distortedUV + direction * amount).r;
-        float g = texture(uTexture, distortedUV).g;
-        float b = texture(uTexture, distortedUV - direction * amount).b;
+        float r = texture(uTexture, syncUV + direction * amount).r;
+        float g = texture(uTexture, syncUV).g;
+        float b = texture(uTexture, syncUV - direction * amount).b;
 
-        vec4 color = vec4(r, g, b, 1.0);
+        vec3 color = vec3(r, g, b);
 
-        // Sample bloom (upscaled)
-        vec4 bloom = texture(uBloom, distortedUV);
+        // Sample bloom (flip Y to match canvas coordinate system)
+        vec2 bloomUV = vec2(distortedUV.x, 1.0 - distortedUV.y);
+        vec3 bloom = texture(uBloom, bloomUV).rgb;
 
-        // Combine with bloom (additive)
-        color.rgb += bloom.rgb * 1.5;
+        // Apply phosphor glow with bloom
+        color = applyPhosphorGlow(color, bloom);
 
-        // Apply scanlines
-        color.rgb *= scanline(distortedUV);
+        // Apply RGB subpixel scanlines
+        color = applyScanlines(color, distortedUV);
 
         // Apply vignette
         float vig = vignette(uv);
-        color.rgb *= vig;
+        color *= vig;
 
-        // Add noise/grain
-        float noise = random(uv + fract(uTime)) * 0.05;
-        color.rgb += noise - 0.025;
+        // MUCH STRONGER noise with less falloff for full-screen grain
+        float distanceFromCenter = length(uv - 0.5);
+        float noiseFalloff = 1.0 - distanceFromCenter * 0.5;  // Less falloff
+        noiseFalloff = max(noiseFalloff, 0.6);  // Keep noise even at edges
+        float noise = animatedNoise(uv, uTime) * 0.25 * noiseFalloff;  // 3x stronger
+        color += noise - 0.125;  // Maintain centered distribution
 
-        // Subtle global flicker (1-3% brightness variation)
-        float flicker = sin(uTime * 2.3) * 0.01 +
-                       sin(uTime * 5.7) * 0.005 +
-                       sin(uTime * 11.3) * 0.003;
-        color.rgb *= (1.0 + flicker);
+        // Multi-frequency flicker (more organic)
+        float flicker = sin(uTime * 2.3) * 0.015 +
+                       sin(uTime * 5.7) * 0.008 +
+                       sin(uTime * 11.3) * 0.004 +
+                       sin(uTime * 23.1) * 0.002;
+        color *= (1.0 + flicker);
 
-        fragColor = vec4(color.rgb, 1.0);
-      }}
+        // Occasional brightness dips (like old monitors)
+        float brightnessDip = smoothstep(0.98, 1.0, random(vec2(floor(uTime * 4.0)))) * 0.15;
+        color *= (1.0 - brightnessDip);
+
+        // Add subtle green glowing static background (like idle CRT screen)
+        // Create animated static pattern
+        float staticPattern = animatedNoise(uv * 3.0, uTime * 2.0);
+        staticPattern = staticPattern * animatedNoise(uv * 5.0, uTime * 1.5);
+
+        // Green phosphor background glow (very subtle, only visible on black areas)
+        vec3 backgroundGlow = vec3(0.0, 0.02, 0.01) * staticPattern;
+
+        // Mix background glow based on darkness (only show on black/dark areas)
+        float darkness = 1.0 - dot(color, vec3(0.333));
+        color += backgroundGlow * darkness * 0.5;
+
+        fragColor = vec4(color, 1.0);
+      }
     `;
 
     // Compile shaders
-    const compileShader = (source, type) => {{
+    const compileShader = (source, type) => {
       const shader = gl.createShader(type);
       gl.shaderSource(shader, source);
       gl.compileShader(shader);
 
-      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {{
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
         console.error('Shader compile error:', gl.getShaderInfoLog(shader));
         gl.deleteShader(shader);
         return null;
-      }}
+      }
 
       return shader;
-    }};
+    };
 
-    const createProgram = (vertSource, fragSource) => {{
+    const createProgram = (vertSource, fragSource) => {
       const vertShader = compileShader(vertSource, gl.VERTEX_SHADER);
       const fragShader = compileShader(fragSource, gl.FRAGMENT_SHADER);
 
-      if (!vertShader || !fragShader) {{
+      if (!vertShader || !fragShader) {
         return null;
-      }}
+      }
 
       const program = gl.createProgram();
       gl.attachShader(program, vertShader);
       gl.attachShader(program, fragShader);
       gl.linkProgram(program);
 
-      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {{
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
         console.error('Program link error:', gl.getProgramInfoLog(program));
         return null;
-      }}
+      }
 
       return program;
-    }};
+    };
 
     // Create programs
     this.brightPassProgram = createProgram(vertexShaderSource, brightPassFragmentSource);
     this.blurProgram = createProgram(vertexShaderSource, blurFragmentSource);
     this.crtProgram = createProgram(vertexShaderSource, crtFragmentSource);
 
-    if (!this.brightPassProgram || !this.blurProgram || !this.crtProgram) {{
+    if (!this.brightPassProgram || !this.blurProgram || !this.crtProgram) {
       console.error('Failed to create shader programs');
       this.webglReady = false;
       return;
-    }}
+    }
 
     // Get uniform locations
-    this.brightPassUniforms = {{
+    this.brightPassUniforms = {
       uTexture: gl.getUniformLocation(this.brightPassProgram, 'uTexture'),
       uResolution: gl.getUniformLocation(this.brightPassProgram, 'uResolution'),
       uTime: gl.getUniformLocation(this.brightPassProgram, 'uTime')
-    }};
+    };
 
-    this.blurUniforms = {{
+    this.blurUniforms = {
       uTexture: gl.getUniformLocation(this.blurProgram, 'uTexture'),
       uResolution: gl.getUniformLocation(this.blurProgram, 'uResolution'),
       uDirection: gl.getUniformLocation(this.blurProgram, 'uDirection')
-    }};
+    };
 
-    this.crtUniforms = {{
+    this.crtUniforms = {
       uTexture: gl.getUniformLocation(this.crtProgram, 'uTexture'),
       uBloom: gl.getUniformLocation(this.crtProgram, 'uBloom'),
       uResolution: gl.getUniformLocation(this.crtProgram, 'uResolution'),
       uTime: gl.getUniformLocation(this.crtProgram, 'uTime')
-    }};
+    };
 
     // Create fullscreen quad
     const positions = new Float32Array([
@@ -941,10 +1066,10 @@ class WEAttendApp {{
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.bloomTexture, 0);
 
     // Validate framebuffer
-    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {{
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
       console.error('Bloom framebuffer incomplete:', gl.checkFramebufferStatus(gl.FRAMEBUFFER));
       throw new Error('Failed to create bloom framebuffer');
-    }}
+    }
 
     // Create blur framebuffer
     this.blurTexture1 = gl.createTexture();
@@ -960,10 +1085,10 @@ class WEAttendApp {{
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.blurTexture1, 0);
 
     // Validate framebuffer
-    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {{
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
       console.error('Blur framebuffer incomplete:', gl.checkFramebufferStatus(gl.FRAMEBUFFER));
       throw new Error('Failed to create blur framebuffer');
-    }}
+    }
 
     // Unbind
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -972,7 +1097,7 @@ class WEAttendApp {{
 
       this.webglReady = true;
       console.log('WebGL CRT effects initialized successfully');
-    }} catch (error) {{
+    } catch (error) {
       console.error('WebGL initialization failed:', error);
       console.log('Falling back to direct canvas rendering (no CRT effects)');
       this.webglReady = false;
@@ -981,71 +1106,19 @@ class WEAttendApp {{
       this.textCanvas.style.display = 'block';
       this.textCanvas.style.zIndex = '10';
       this.glCanvas.style.display = 'none';
-    }}
-  }}
-}}
+    }
+  }
+}
 
 // ============================================================================
 // START
 // ============================================================================
 
-window.addEventListener('DOMContentLoaded', async () => {{
+window.addEventListener('DOMContentLoaded', async () => {
   const app = new WEAttendApp();
   await app.init();
-}});
+});
 
   </script>
 </body>
-</html>'''
-
-    output_path = os.path.join(SCRIPT_DIR, 'we.html')
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write(html)
-
-    output_size = os.path.getsize(output_path) / (1024 * 1024)
-
-    print("\n" + "="*60)
-    print("BUILD COMPLETE!")
-    print("="*60)
-    print(f"File: {output_path}")
-    print(f"Size: {output_size:.2f} MB")
-    print("\nFeatures:")
-    print("  [x] ONNX model embedded (infinite generation)")
-    print("  [x] Full denoising animation (all 128 steps)")
-    print("  [x] Web Audio soundscape")
-    print("  [x] State machine (WE -> confession cycle)")
-    print("  [x] WebGL 2.0 CRT effects (phosphor glow, scanlines, chromatic aberration, etc.)")
-    print("\nCRT Effects:")
-    print("  - Phosphor green bloom/glow")
-    print("  - Horizontal scanlines with flicker")
-    print("  - Barrel distortion (subtle curvature)")
-    print("  - Chromatic aberration (RGB split at edges)")
-    print("  - Vignette (corner darkening)")
-    print("  - Animated grain/noise")
-    print("\nTest: Open in browser and click anywhere")
-    print("="*60)
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(
-        description='Build self-contained HTML art piece with embedded ONNX model'
-    )
-    parser.add_argument(
-        '--dataset',
-        type=str,
-        default='confessions',
-        help='Dataset name for vocabulary (default: confessions)'
-    )
-    parser.add_argument(
-        '--model',
-        type=str,
-        default=None,
-        help='Path to ONNX model (default: models/{dataset}_model_merged.onnx)'
-    )
-
-    args = parser.parse_args()
-
-    # Generate default model path if not specified
-    if args.model is None:
-        args.model = os.path.join(PROJECT_ROOT, 'models', f'{args.dataset}_model_merged.onnx')
-
-    build_complete_html(args.dataset, args.model)
+</html>

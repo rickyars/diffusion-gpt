@@ -2,6 +2,35 @@
 
 This guide explains how to customize the visual effects, timing, and flow of the WE art piece (`scripts/art-piece/we.html`), and how to convert PyTorch models to ONNX format for browser deployment.
 
+## Template Architecture
+
+The WE art piece uses a template-based system that separates your edits from model data:
+
+- **`we.template.html`** - The template with data placeholders (committed to git, ~39 KB)
+  - Contains all your styling, animations, and code structure
+  - Has clearly marked placeholders for: `{{MODEL_CONFIG}}`, `{{VOCAB}}`, `{{MODEL_BASE64}}`, `{{INFERENCE_ENGINE}}`
+  - Updated manually via `extract_template.py` when you make edits
+
+- **`we.html`** - The generated output (gitignored, ~60 MB)
+  - Created by filling the template with model data
+  - Generated fresh whenever you update the model via `update_model.py`
+  - Safe to edit for development/testing, but regenerates with new models
+
+**Why this matters:** You can edit `we.html` freely without worrying about losing edits when you update the model. Your customizations stay in the template.
+
+### The Workflow
+
+**To edit and preserve customizations:**
+1. Edit `we.html` (styling, effects, timing, animations, etc.)
+2. Run `python extract_template.py` to save your edits to the template
+3. Commit the updated `we.template.html` to git
+4. Later, run `python update_model.py` to regenerate `we.html` with a new model
+5. Your edits from the template are automatically included ✓
+
+**Scripts:**
+- **`extract_template.py`** - Extracts your `we.html` edits and saves them to `we.template.html` with data placeholders
+- **`update_model.py`** - Fills the template with model data to generate fresh `we.html` (with safety checks for unapplied edits)
+
 ---
 
 ## ONNX Conversion for Browser Deployment
@@ -43,43 +72,23 @@ This will create:
 - `--model`: Path to your trained PyTorch checkpoint (required)
 - `--dataset`: Dataset name used for output files (required)
 
-### Step 2: Merge External ONNX Data (If Needed)
+### Step 2: Update the HTML Art Piece with Model Data
 
-If the ONNX export created a `.onnx.data` file, merge it into a single file:
-
-```bash
-python scripts/art-piece/merge_onnx_data.py \
-  --input models/confessions_model.onnx
-```
-
-This creates `models/confessions_model_merged.onnx` with all data embedded.
-
-**When is this needed?**
-- Large models may have external data files to reduce file size during creation
-- Browser deployment requires a single ONNX file
-- Merging is done automatically if a `.data` file exists
-
-**Options:**
-- `--input`: Path to ONNX model with external data (required)
-- `--output`: Output path (optional, defaults to `{input}_merged.onnx`)
-
-### Step 3: Build the HTML Art Piece
-
-Once you have the ONNX model, use the build script to create the final HTML file:
+Once you have the ONNX model, use the update script to inject the model into the HTML template:
 
 ```bash
-python scripts/art-piece/build.py --dataset confessions
+python scripts/art-piece/update_model.py --dataset confessions
 ```
 
-This will create `scripts/art-piece/we.html` (~60MB) with:
-- Embedded ONNX model (quantized)
+This will generate `scripts/art-piece/we.html` (~60MB) with:
+- Embedded ONNX model (base64 encoded)
 - Embedded vocabulary
 - All JavaScript code, shaders, and audio
 - Self-contained (no external dependencies)
 
 **Options:**
-- `--dataset`: Dataset name to find the ONNX model (required)
-- `--model`: Custom ONNX model path (optional)
+- `--dataset`: Dataset name to find the ONNX model (required, default: confessions)
+- `--model`: Custom ONNX model path (optional, default: models/{dataset}_model_merged.onnx)
 
 ### Complete Workflow Example
 
@@ -94,15 +103,37 @@ python scripts/art-piece/export_to_onnx.py \
   --model models/confessions_epoch_25.pt \
   --dataset confessions
 
-# 3. Merge ONNX data (if needed)
-python scripts/art-piece/merge_onnx_data.py \
-  --input models/confessions_model.onnx
+# 3. Update HTML with model data
+python scripts/art-piece/update_model.py --dataset confessions
 
-# 4. Build HTML art piece
-python scripts/art-piece/build.py --dataset confessions
-
-# 5. View in browser
+# 4. View in browser
 start scripts/art-piece/we.html
+```
+
+**Note on ONNX merging:** Modern PyTorch ONNX export (opset 18+) creates single self-contained `.onnx` files. The old `merge_onnx_data.py` step is no longer needed. If you encounter a `.onnx.data` file (from older PyTorch versions), `update_model.py` can still process it.
+
+#### Customization Workflow
+
+The template system allows you to edit `we.html` freely without losing your changes to new models:
+
+```bash
+# 1. Initial setup (done once)
+# Template already exists at scripts/art-piece/we.template.html
+
+# 2. Edit we.html for styling, timing, effects, etc.
+# (Your HTML editor, visual customizations, etc.)
+
+# 3. Save your edits as the new template baseline
+python scripts/art-piece/extract_template.py
+# This updates we.template.html with your changes
+
+# 4. Commit the updated template to git
+git add scripts/art-piece/we.template.html
+git commit -m "Update WE template with new styling"
+
+# 5. Later, when you have a new model, update HTML with fresh model data
+python scripts/art-piece/update_model.py --model models/new_model.onnx --dataset confessions
+# Your template edits are preserved!
 ```
 
 ### File Size Optimization
@@ -137,6 +168,35 @@ The export process optimizes for browser deployment:
 - Ensure you ran the export_to_onnx.py script first
 - Check that the dataset name matches (case-sensitive)
 - Verify files exist: `ls models/confessions_model*.onnx`
+
+### Troubleshooting Template Updates
+
+**"WARNING: Unapplied edits detected in we.html!" when running update_model.py:**
+- This means you've edited `we.html` but haven't extracted the template yet
+- **Solution:** Run `python extract_template.py` first to save your edits
+- Then run `python update_model.py` again
+- Your edits are automatically backed up to `we.html.backup` for safety
+
+**Accidentally ran update_model.py before extracting?**
+- Don't worry! Your old version was saved as `we.html.backup`
+- To recover: Rename `we.html.backup` back to `we.html` and try again
+- Or, extract the backup and use that as your template:
+  ```bash
+  cp scripts/art-piece/we.html.backup scripts/art-piece/we.html
+  python scripts/art-piece/extract_template.py
+  ```
+
+**Want to discard edits and proceed with model update?**
+- Use the `--force` flag: `python update_model.py --force`
+- A backup is still created automatically
+- Your old `we.html` is saved to `we.html.backup`
+
+**Template seems out of sync with we.html:**
+- If you edited the template directly (not via `we.html` extraction), run:
+  ```bash
+  python scripts/art-piece/update_model.py
+  ```
+- This regenerates `we.html` from the current template
 
 ---
 
