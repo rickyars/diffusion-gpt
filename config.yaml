@@ -8,7 +8,7 @@ seed: 42
 
 # Training hyperparameters
 training:
-  epochs: 51  # 25-50 epochs is usually sufficient (100 is overkill)
+  epochs: 50  # 25-50 epochs is usually sufficient (100 is overkill)
   batch_size: 352  # increase to 128 or 256 if GPU memory allows
   learning_rate: 0.0001
   val_split: 0.1  # fraction of data for validation
@@ -20,6 +20,8 @@ training:
   use_amp: true  # Enable mixed precision training (AMP) for faster computation (requires CUDA, slightly less stable than FP32)
   loss_weight_mode: 'snr'  # options: 'uniform' (baseline), 'snr' (emphasize sharpness), 'importance' (faster convergence)
   skip_completed: true  # skip datasets that have completed training (final .pt file exists)
+  warmup_steps: 1000  # number of steps for linear learning rate warmup (set to 0 to disable)
+  min_lr_ratio: 0.1  # minimum learning rate as a fraction of initial LR during cosine annealing
 
 # Model architecture
 model:
