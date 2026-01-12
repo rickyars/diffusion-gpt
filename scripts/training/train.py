@@ -11,6 +11,7 @@ import time
 import tempfile
 from typing import Optional
 
+import numpy as np
 import torch
 import torch.optim as optim
 import yaml
@@ -160,6 +161,31 @@ def loss_function(
     loss = loss.mean()
 
     return loss
+
+
+def get_warmup_cosine_schedule(optimizer, warmup_steps, total_steps, min_lr_ratio=0.1):
+    """
+    Create a learning rate schedule with linear warmup followed by cosine annealing.
+
+    Args:
+        optimizer: PyTorch optimizer
+        warmup_steps: number of steps for linear warmup phase
+        total_steps: total number of training steps
+        min_lr_ratio: minimum learning rate as a fraction of the initial LR (default: 0.1)
+
+    Returns:
+        torch.optim.lr_scheduler.LambdaLR scheduler
+    """
+    def lr_lambda(step):
+        if step < warmup_steps:
+            # Linear warmup
+            return step / warmup_steps
+        else:
+            # Cosine annealing
+            progress = (step - warmup_steps) / (total_steps - warmup_steps)
+            return max(min_lr_ratio, 0.5 * (1 + np.cos(np.pi * progress)))
+
+    return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
 
 def train_model(
@@ -319,6 +345,17 @@ def train_model(
     # Initialize optimizer
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, fused=use_fused_adamw)
 
+    # Initialize learning rate scheduler
+    warmup_steps = config['training'].get('warmup_steps', 1000)
+    min_lr_ratio = config['training'].get('min_lr_ratio', 0.1)
+    total_steps = len(train_loader) * epochs
+
+    # Create scheduler (supports disabling by setting warmup_steps=0)
+    if warmup_steps > 0:
+        scheduler = get_warmup_cosine_schedule(optimizer, warmup_steps, total_steps, min_lr_ratio)
+    else:
+        scheduler = None
+
     # Load optimizer state if resuming
     if resume_from and os.path.exists(resume_from) and start_epoch > 0:
         checkpoint = torch.load(resume_from, map_location=device, weights_only=False)
@@ -369,6 +406,10 @@ def train_model(
     print("=" * 80)
     print(f"Optimizer:")
     print(f"  AdamW mode:              {'fused' if use_fused_adamw else 'standard'}")
+    print(f"  LR schedule:             {'warmup + cosine' if scheduler is not None else 'constant'}")
+    if scheduler is not None:
+        print(f"    Warmup steps:          {warmup_steps}")
+        print(f"    Min LR ratio:          {min_lr_ratio}")
     print(f"Computation:")
     print(f"  torch.compile:           {'enabled' if use_compile else 'disabled'}")
     print(f"  Mixed precision (AMP):   {'enabled' if use_amp else 'disabled'}")
@@ -434,6 +475,10 @@ def train_model(
                     loss.backward()
                     optimizer.step()
 
+                # Update learning rate scheduler (after optimizer.step)
+                if scheduler is not None:
+                    scheduler.step()
+
                 epoch_loss += loss.item()
                 num_batches += 1
                 epoch_chars += batch.numel()  # Track total characters (tokens) in batch
@@ -445,7 +490,15 @@ def train_model(
             avg_train_loss = epoch_loss / num_batches if num_batches > 0 else 0.0
             epoch_time = time.time() - epoch_start
             samples_per_sec = (num_batches * batch_size) / epoch_time if epoch_time > 0 else 0
+
+            # Get current learning rate from scheduler or optimizer
+            if scheduler is not None:
+                current_lr = scheduler.get_last_lr()[0]
+            else:
+                current_lr = optimizer.param_groups[0]['lr']
+
             print(f"\nEpoch [{epoch+1}/{epochs}] Average Train Loss: {avg_train_loss:.4f}")
+            print(f"  Learning rate:     {current_lr:.2e}")
             print(f"  Epoch time: {epoch_time:.1f}s | Throughput: {samples_per_sec:.0f} samples/sec")
             print(f"  Characters processed: {epoch_chars:,}")
 
