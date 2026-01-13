@@ -321,13 +321,35 @@ class GPTQuantized(nn.Module):
         qat_model = GPTQuantized.from_checkpoint('model.pt')
     """
 
-    def __init__(self, config: GPTConfig):
+    def __init__(self, config: GPTConfig, backend: str = 'fbgemm'):
         super().__init__()
         self.model = GPT(config)
         self.config = config
+        self.backend = backend
 
         # QAT config - use 'fbgemm' for x86, 'qnnpack' for ARM
-        self.qconfig = quantization.get_default_qat_qconfig('fbgemm')
+        # Using newer API to avoid deprecation warning
+        if backend == 'fbgemm':
+            # x86 CPUs: symmetric quantization, range 0-255 for activations
+            self.qconfig = quantization.QConfig(
+                activation=quantization.FakeQuantize.with_args(
+                    observer=quantization.MovingAverageMinMaxObserver,
+                    quant_min=0,
+                    quant_max=255,
+                    dtype=torch.quint8,
+                    qscheme=torch.per_tensor_affine
+                ),
+                weight=quantization.FakeQuantize.with_args(
+                    observer=quantization.MovingAverageMinMaxObserver,
+                    quant_min=-128,
+                    quant_max=127,
+                    dtype=torch.qint8,
+                    qscheme=torch.per_tensor_symmetric
+                )
+            )
+        else:  # qnnpack
+            # ARM CPUs
+            self.qconfig = quantization.get_default_qat_qconfig(backend)
 
     def forward(self, idx, sigma):
         """Forward pass (delegates to wrapped model)."""
@@ -344,17 +366,14 @@ class GPTQuantized(nn.Module):
         print("PREPARING MODEL FOR QUANTIZATION-AWARE TRAINING")
         print("="*70)
 
-        # Set to eval mode for preparation
-        self.model.eval()
+        # Set to train mode for preparation (prepare_qat requires training mode)
+        self.model.train()
 
         # Apply qconfig to all modules
         self.model.qconfig = self.qconfig
 
         # Prepare QAT - this adds FakeQuantize modules
         quantization.prepare_qat(self.model, inplace=True)
-
-        # Back to train mode
-        self.model.train()
 
         print("[OK] Fake quantization modules added")
         print("[OK] Observers initialized (will collect activation stats)")
@@ -388,13 +407,14 @@ class GPTQuantized(nn.Module):
         return self.model.get_num_params()
 
     @classmethod
-    def from_checkpoint(cls, checkpoint_path: str, device='cpu'):
+    def from_checkpoint(cls, checkpoint_path: str, device='cpu', backend='fbgemm'):
         """
         Load FP32 checkpoint and prepare for QAT.
 
         Args:
             checkpoint_path: Path to existing FP32 model checkpoint
             device: Device to load model on
+            backend: Quantization backend ('fbgemm' or 'qnnpack')
 
         Returns:
             GPTQuantized model ready for QAT training
@@ -406,7 +426,7 @@ class GPTQuantized(nn.Module):
         config = GPTConfig(**checkpoint['config'])
 
         # Create QAT model
-        qat_model = cls(config)
+        qat_model = cls(config, backend=backend)
 
         # Load FP32 weights
         state_dict = checkpoint['model_state_dict']

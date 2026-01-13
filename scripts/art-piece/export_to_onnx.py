@@ -55,7 +55,9 @@ def export_model_to_onnx(model_path, dataset_name):
     # Initialize model (QAT or standard)
     if is_qat:
         # Create QAT model and load weights
-        qat_model = GPTQuantized(config)
+        # Default to fbgemm backend (x86) - most common for deployment
+        qat_backend = checkpoint.get('qat_backend', 'fbgemm')
+        qat_model = GPTQuantized(config, backend=qat_backend)
         qat_model.prepare_qat()  # Prepare with fake quantization
         qat_model.model.load_state_dict(checkpoint['model_state_dict'])
         qat_model.eval()

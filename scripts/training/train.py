@@ -225,6 +225,14 @@ def train_model(
     use_qat = config['training'].get('use_qat', False)  # Default to False (standard FP32 training)
     qat_backend = config['training'].get('qat_backend', 'fbgemm')  # Default to fbgemm (x86)
 
+    # QAT and AMP are incompatible - disable AMP if QAT is enabled
+    if use_qat and use_amp:
+        print(f"\n{'='*80}")
+        print("WARNING: QAT and AMP (Mixed Precision) are incompatible")
+        print("Disabling AMP for QAT training (QAT requires FP32)")
+        print(f"{'='*80}\n")
+        use_amp = False
+
     # Paths
     models_dir = config['paths']['models_dir']
     vocab_dir = config['paths']['vocab_dir']
@@ -302,7 +310,7 @@ def train_model(
         print(f"Final model will be ~4x smaller and ~2x faster")
         print(f"{'='*80}\n")
 
-        model = GPTQuantized(model_config)
+        model = GPTQuantized(model_config, backend=qat_backend)
         model.prepare_qat()
         model.to(device)
     else:
@@ -352,6 +360,7 @@ def train_model(
     if use_compile and hasattr(torch, 'compile') and device.type == 'cuda':
         try:
             model = torch.compile(model)
+            print(f"[OK] torch.compile() enabled - ~2x training speedup expected")
         except Exception as e:
             print(f"[WARN] torch.compile() failed: {str(e)[:100]}")
             print(f"       Set 'use_compile: false' in config.yaml to disable")
@@ -573,6 +582,7 @@ def train_model(
                     'optimizer_mode': 'fused' if use_fused_adamw else 'standard',
                     'loss_weight_mode': loss_weight_mode,
                     'qat_trained': use_qat,  # Mark if this was QAT training
+                    'qat_backend': qat_backend if use_qat else None,  # Save QAT backend
                 }
                 checkpoint_path = os.path.join(models_dir, f"{dataset_name}_epoch_{epoch+1}.pt")
                 torch.save(checkpoint, checkpoint_path)
@@ -609,6 +619,7 @@ def train_model(
             'optimizer_mode': 'fused' if use_fused_adamw else 'standard',
             'loss_weight_mode': loss_weight_mode,
             'qat_trained': use_qat,
+            'qat_backend': qat_backend if use_qat else None,
         }
         interrupted_path = os.path.join(models_dir, f"{dataset_name}_interrupted_epoch_{epoch+1}.pt")
         torch.save(interrupted_checkpoint, interrupted_path)
@@ -628,6 +639,7 @@ def train_model(
             'optimizer_mode': 'fused' if use_fused_adamw else 'standard',
             'loss_weight_mode': loss_weight_mode,
             'qat_trained': use_qat,
+            'qat_backend': qat_backend if use_qat else None,
         }
         torch.save(final_checkpoint, model_path)
         print(f"\nTraining completed! Final model saved to: {model_path}")
