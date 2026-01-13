@@ -1,76 +1,105 @@
-# Discrete Diffusion GPT Training Configuration
+# =============================================================================
+# Discrete Diffusion GPT Configuration
+# =============================================================================
 
-# Device configuration
-device: auto  # 'auto', 'cuda', 'cpu' - auto will use CUDA if available
-
-# Random seed for reproducibility
-seed: 42
-
-# Training hyperparameters
-training:
-  epochs: 50  # 25-50 epochs is usually sufficient (100 is overkill)
-  batch_size: 352  # increase to 128 or 256 if GPU memory allows
-  learning_rate: 0.0001
-  val_split: 0.1  # fraction of data for validation
-  eval_interval: 5  # evaluate every N epochs
-  save_interval: 5  # save checkpoint every N epochs
-  log_interval: 100  # log loss every N batches (was 10, reduced I/O overhead)
-  use_compile: true  # torch.compile() for faster training (requires Triton, may not work on Windows)
-  use_fused_adamw: true  # Enable fused AdamW optimizer (5-8% speedup on NVIDIA GPUs, requires CUDA)
-  use_amp: true  # Enable mixed precision training (AMP) for faster computation (requires CUDA, slightly less stable than FP32)
-  loss_weight_mode: 'snr'  # options: 'uniform' (baseline), 'snr' (emphasize sharpness), 'importance' (faster convergence)
-  skip_completed: true  # skip datasets that have completed training (final .pt file exists)
-  warmup_steps: 1000  # number of steps for linear learning rate warmup (set to 0 to disable)
-  min_lr_ratio: 0.1  # minimum learning rate as a fraction of initial LR during cosine annealing
-
-# Model architecture
-model:
-  n_layer: 6  # number of transformer layers
-  n_head: 6  # number of attention heads
-  n_embd: 384  # embedding dimension
-  cond_dim: 64  # conditioning dimension for noise
-  dropout: 0.2  # dropout probability
-  bias: false  # use bias in linear layers
-  context_length: 256  # maximum sequence length
-
-# Noise schedule
-noise:
-  sigma_min: 0.0001
-  sigma_max: 20.0
-
-# Sampling/Generation parameters
-sampling:
-  steps: 128  # number of denoising steps
-  temperature: 1.0  # sampling temperature
-  num_samples: 10  # number of samples to generate
-
-# Datasets configuration
-# Add your datasets here following the template below
-# Each dataset should be a .txt file with one document per line
-
-datasets:
-  # Example 1: Shakespeare (for testing)
-  shakespeare:
-    path: datasets/shakespeare.txt
-    enabled: true
-    description: "Shakespeare's complete works"
-    # max_chars: 1000000  # Optional: limit to first 1M characters
-
-  # 1M Reddit confessions, as sample
-  confessions-sample:
-    path: datasets/reddit-confessions-sample.txt
-    enabled: true
-    description: "1M Reddit confessions"
-
-  # r/confession
-  confession:
-    path: datasets/r-confessions.txt
-    enabled: true
-    description: "r/confession"
+# =============================================================================
+# System Configuration
+# =============================================================================
+device: auto  # 'auto' (use CUDA if available), 'cuda', or 'cpu'
+seed: 42      # Random seed for reproducibility
 
 # Output directories
 paths:
   datasets_dir: datasets
   models_dir: models
   outputs_dir: outputs
-  vocab_dir: vocab  # store vocabulary files here
+  vocab_dir: vocab
+
+
+# =============================================================================
+# Model Architecture
+# =============================================================================
+model:
+  # Transformer architecture
+  n_layer: 6           # Number of transformer layers
+  n_head: 6            # Number of attention heads
+  n_embd: 384          # Embedding dimension
+  context_length: 256  # Maximum sequence length
+  dropout: 0.2         # Dropout probability during training
+  bias: false          # Use bias in linear layers (false = slightly faster)
+
+  # Conditioning for diffusion
+  cond_dim: 64         # Conditioning dimension for noise level
+
+  # Noise schedule (diffusion process)
+  sigma_min: 0.0001    # Minimum noise level
+  sigma_max: 20.0      # Maximum noise level
+
+
+# =============================================================================
+# Training Configuration
+# =============================================================================
+training:
+  # Basic training parameters
+  epochs: 50                  # Number of training epochs (25-50 usually sufficient)
+  batch_size: 352             # Batch size (reduce if OOM, increase if memory allows)
+  learning_rate: 0.0001       # Initial learning rate
+
+  # Learning rate schedule
+  warmup_steps: 1000          # Steps for linear LR warmup (0 to disable)
+  min_lr_ratio: 0.1           # Min LR as fraction of initial LR (cosine annealing)
+
+  # Validation and logging
+  val_split: 0.1              # Fraction of data for validation
+  eval_interval: 5            # Evaluate validation loss every N epochs
+  save_interval: 5            # Save checkpoint every N epochs
+  log_interval: 100           # Log training loss every N batches
+  skip_completed: true        # Skip datasets with existing final checkpoint
+
+  # Loss configuration
+  loss_weight_mode: 'snr'     # 'uniform', 'snr' (emphasize sharpness), or 'importance' (faster convergence)
+
+  # Performance optimizations
+  use_compile: true           # torch.compile() for faster training (CUDA only, requires Triton)
+  use_fused_adamw: true       # Fused AdamW optimizer (5-8% speedup on CUDA)
+  use_amp: true               # Automatic Mixed Precision (faster, uses less memory on CUDA)
+
+  # Quantization-Aware Training (QAT)
+  use_qat: false              # Train with INT8 quantization awareness (4x smaller, 2x faster inference)
+  qat_backend: 'fbgemm'       # 'fbgemm' (x86 CPUs) or 'qnnpack' (ARM CPUs)
+
+
+# =============================================================================
+# Generation Configuration (defaults for generate.py)
+# =============================================================================
+generation:
+  steps: 128           # Number of denoising steps (more = better quality, slower)
+  temperature: 1.0     # Sampling temperature (higher = more random)
+  num_samples: 10      # Number of samples to generate
+
+
+# =============================================================================
+# Datasets
+# =============================================================================
+# Add your datasets here. Each dataset should be a .txt file with one
+# document/paragraph per line in UTF-8 encoding.
+
+datasets:
+  # Example: Shakespeare (good for testing)
+  shakespeare:
+    path: datasets/shakespeare.txt
+    enabled: true
+    description: "Shakespeare's complete works"
+    # max_chars: 1000000  # Optional: limit to first N characters for testing
+
+  # Reddit confessions sample
+  confessions-sample:
+    path: datasets/reddit-confessions-sample.txt
+    enabled: true
+    description: "1M Reddit confessions (sample)"
+
+  # Full r/confession dataset
+  confession:
+    path: datasets/r-confessions.txt
+    enabled: true
+    description: "r/confession posts"

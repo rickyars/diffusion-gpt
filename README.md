@@ -299,44 +299,78 @@ The model will use discrete diffusion to generate coherent text that starts with
 
 ### Configuration
 
-All hyperparameters are in `config.yaml`:
+All hyperparameters are in `config.yaml`, organized into logical sections:
+
+#### System Configuration
+
+```yaml
+device: auto      # 'auto' (use CUDA if available), 'cuda', or 'cpu'
+seed: 42          # Random seed for reproducibility
+```
 
 #### Model Architecture
 
 ```yaml
 model:
-  n_layer: 6        # Number of transformer layers
-  n_head: 6         # Number of attention heads
-  n_embd: 384       # Embedding dimension
-  cond_dim: 64      # Conditioning dimension for noise
-  dropout: 0.2      # Dropout probability
+  # Transformer architecture
+  n_layer: 6           # Number of transformer layers
+  n_head: 6            # Number of attention heads
+  n_embd: 384          # Embedding dimension
   context_length: 256  # Maximum sequence length
+  dropout: 0.2         # Dropout probability
+  bias: false          # Use bias in linear layers
+
+  # Conditioning for diffusion
+  cond_dim: 64         # Conditioning dimension for noise level
+
+  # Noise schedule (diffusion process)
+  sigma_min: 0.0001    # Minimum noise level
+  sigma_max: 20.0      # Maximum noise level
 ```
 
 #### Training Settings
 
 ```yaml
 training:
-  epochs: 100
-  batch_size: 64
+  # Basic parameters
+  epochs: 50
+  batch_size: 352
   learning_rate: 0.0001
+
+  # Learning rate schedule
+  warmup_steps: 1000       # Linear LR warmup steps
+  min_lr_ratio: 0.1        # Min LR for cosine annealing
+
+  # Validation and logging
   val_split: 0.1           # Validation split
   eval_interval: 5         # Evaluate every N epochs
   save_interval: 5         # Save checkpoint every N epochs
-  log_interval: 10         # Log loss every N batches
+  log_interval: 100        # Log loss every N batches
+  skip_completed: true     # Skip already-trained datasets
+
+  # Loss configuration
+  loss_weight_mode: 'snr'  # 'uniform', 'snr', or 'importance'
+
+  # Performance optimizations
+  use_compile: true        # torch.compile() for speed
+  use_fused_adamw: true    # Fused AdamW optimizer
+  use_amp: true            # Automatic Mixed Precision
+
+  # Quantization-Aware Training
+  use_qat: false           # Train with INT8 quantization
+  qat_backend: 'fbgemm'    # 'fbgemm' (x86) or 'qnnpack' (ARM)
 ```
 
-#### Noise Schedule
+#### Generation Defaults
 
 ```yaml
-noise:
-  sigma_min: 0.0001
-  sigma_max: 20.0
+generation:
+  steps: 128           # Denoising steps (overridable via CLI)
+  temperature: 1.0     # Sampling temperature
+  num_samples: 10      # Number of samples to generate
 ```
 
 #### Datasets
-
-Add your datasets:
 
 ```yaml
 datasets:
@@ -344,6 +378,7 @@ datasets:
     path: datasets/my_dataset.txt
     enabled: true
     description: "Description of your dataset"
+    # max_chars: 1000000  # Optional: limit for testing
 ```
 
 ## Dataset Preparation
@@ -406,6 +441,12 @@ Checkpoints contain:
 
 ```python
 import torch
+import sys
+import os
+
+# Add training directory to path
+sys.path.insert(0, 'scripts/training')
+
 from model import GPT, GPTConfig
 
 checkpoint = torch.load('models/shakespeare.pt')
@@ -497,10 +538,28 @@ Mixed-precision training is automatically enabled on CUDA devices:
 
 No configuration needed—it works automatically and can reduce memory usage by ~30%.
 
+### Quantization-Aware Training (QAT)
+
+Train models with INT8 quantization awareness for 4x smaller and 2x faster inference in the browser:
+
+```yaml
+training:
+  use_qat: true  # Enable QAT
+  qat_backend: 'fbgemm'  # x86 or ARM backend
+```
+
+Results:
+- Model size: 45 MB → 11 MB (4x reduction)
+- Browser inference: 640ms → 320ms per step (2x speedup)
+- Quality: Same as FP32 (no gibberish)
+
+See **[docs/QAT_GUIDE.md](docs/QAT_GUIDE.md)** for complete guide.
+
 ## 📚 Documentation
 
 Detailed guides have been organized in the `docs/` folder:
 
+- **[docs/QAT_GUIDE.md](docs/QAT_GUIDE.md)** - Quantization-Aware Training for smaller, faster models
 - **[docs/WE_CUSTOMIZATION_GUIDE.md](docs/WE_CUSTOMIZATION_GUIDE.md)** - Customizing the WE art piece and converting models to ONNX
 - **[docs/ANIMATION_GUIDE.md](docs/ANIMATION_GUIDE.md)** - Creating animated GIFs of denoising process
 - **[docs/CONDITIONAL_GENERATION.md](docs/CONDITIONAL_GENERATION.md)** - Conditional text generation with prefix/suffix constraints

@@ -10,6 +10,7 @@ from typing import Optional
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+import torch.quantization as quantization
 
 
 @dataclass
@@ -298,3 +299,129 @@ class GPT(nn.Module):
         x = torch.scatter(x, -1, idx[..., None], torch.zeros_like(x[..., :1]))
 
         return x
+
+
+# =============================================================================
+# Quantization-Aware Training (QAT) Wrapper
+# =============================================================================
+
+class GPTQuantized(nn.Module):
+    """
+    QAT wrapper for GPT model that adds quantization-aware training support.
+
+    This wraps the existing GPT model with PyTorch's QAT functionality,
+    allowing the model to learn within INT8 constraints during training.
+
+    Usage:
+        # Create from config
+        qat_model = GPTQuantized(config)
+        qat_model.prepare_qat()
+
+        # Or load from FP32 checkpoint
+        qat_model = GPTQuantized.from_checkpoint('model.pt')
+    """
+
+    def __init__(self, config: GPTConfig):
+        super().__init__()
+        self.model = GPT(config)
+        self.config = config
+
+        # QAT config - use 'fbgemm' for x86, 'qnnpack' for ARM
+        self.qconfig = quantization.get_default_qat_qconfig('fbgemm')
+
+    def forward(self, idx, sigma):
+        """Forward pass (delegates to wrapped model)."""
+        return self.model(idx, sigma)
+
+    def prepare_qat(self):
+        """
+        Prepare model for quantization-aware training.
+
+        This adds "fake quantization" modules that simulate INT8 during training.
+        Call this ONCE before training starts.
+        """
+        print("\n" + "="*70)
+        print("PREPARING MODEL FOR QUANTIZATION-AWARE TRAINING")
+        print("="*70)
+
+        # Set to eval mode for preparation
+        self.model.eval()
+
+        # Apply qconfig to all modules
+        self.model.qconfig = self.qconfig
+
+        # Prepare QAT - this adds FakeQuantize modules
+        quantization.prepare_qat(self.model, inplace=True)
+
+        # Back to train mode
+        self.model.train()
+
+        print("[OK] Fake quantization modules added")
+        print("[OK] Observers initialized (will collect activation stats)")
+        print("[OK] Model ready for QAT training")
+        print("\nDuring training:")
+        print("  - Forward pass uses fake INT8 quantization")
+        print("  - Backward pass uses full FP32 gradients")
+        print("  - Model learns to work within INT8 constraints")
+        print("="*70 + "\n")
+
+    def convert_to_quantized(self):
+        """
+        Convert to true INT8 quantized model.
+
+        Call this AFTER QAT training completes, before export to ONNX.
+        """
+        print("\n" + "="*70)
+        print("CONVERTING TO TRUE INT8 QUANTIZED MODEL")
+        print("="*70)
+
+        self.model.eval()
+        quantization.convert(self.model, inplace=True)
+
+        print("[OK] Model converted to INT8")
+        print("[OK] Weights and activations now use INT8")
+        print("[OK] Ready for ONNX export")
+        print("="*70 + "\n")
+
+    def get_num_params(self):
+        """Get number of parameters (delegates to wrapped model)."""
+        return self.model.get_num_params()
+
+    @classmethod
+    def from_checkpoint(cls, checkpoint_path: str, device='cpu'):
+        """
+        Load FP32 checkpoint and prepare for QAT.
+
+        Args:
+            checkpoint_path: Path to existing FP32 model checkpoint
+            device: Device to load model on
+
+        Returns:
+            GPTQuantized model ready for QAT training
+        """
+        print(f"\nLoading FP32 checkpoint: {checkpoint_path}")
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+
+        # Extract config
+        config = GPTConfig(**checkpoint['config'])
+
+        # Create QAT model
+        qat_model = cls(config)
+
+        # Load FP32 weights
+        state_dict = checkpoint['model_state_dict']
+
+        # Handle compiled model state dict (strip _orig_mod prefix if present)
+        if any(k.startswith('_orig_mod.') for k in state_dict.keys()):
+            state_dict = {k.replace('_orig_mod.', ''): v for k, v in state_dict.items()}
+
+        qat_model.model.load_state_dict(state_dict)
+
+        print(f"[OK] Loaded FP32 weights")
+        print(f"[OK] Model config: {config}")
+        print(f"[OK] Parameters: {qat_model.get_num_params() / 1e6:.2f}M")
+
+        # Prepare for QAT
+        qat_model.prepare_qat()
+
+        return qat_model

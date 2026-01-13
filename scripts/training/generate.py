@@ -11,9 +11,6 @@ import textwrap
 import torch
 import yaml
 
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
-
 from model import GPT, GPTConfig
 from utils import (
     GeometricNoise,
@@ -318,13 +315,13 @@ def main():
 
     # Initialize noise schedule
     noise = GeometricNoise(
-        sigma_min=config['noise']['sigma_min'],
-        sigma_max=config['noise']['sigma_max'],
+        sigma_min=config['model']['sigma_min'],
+        sigma_max=config['model']['sigma_max'],
     )
 
     # Generation parameters
-    num_samples = args.samples if args.samples is not None else config['sampling']['num_samples']
-    steps = args.steps if args.steps is not None else config['sampling']['steps']
+    num_samples = args.samples if args.samples is not None else config['generation']['num_samples']
+    steps = args.steps if args.steps is not None else config['generation']['steps']
     context_length = model_config.block_size
 
     print(f"\nGenerating {num_samples} samples with {steps} denoising steps...")

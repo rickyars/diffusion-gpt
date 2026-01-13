@@ -16,11 +16,8 @@ import torch
 import torch.optim as optim
 import yaml
 
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
-
 from dataset_loader import get_data_loader
-from model import GPT, GPTConfig
+from model import GPT, GPTConfig, GPTQuantized
 from utils import GeometricNoise, perturb_batch, set_seed, compute_loss_weight
 
 # Configure Triton and torch inductor cache to use shorter paths on Windows
@@ -225,6 +222,8 @@ def train_model(
     use_fused_adamw = config['training'].get('use_fused_adamw', True)  # Default to True for speed
     use_amp = config['training'].get('use_amp', device.type == 'cuda')  # Default to True on CUDA, False on CPU
     loss_weight_mode = config['training'].get('loss_weight_mode', 'uniform')  # Default to uniform for backward compatibility
+    use_qat = config['training'].get('use_qat', False)  # Default to False (standard FP32 training)
+    qat_backend = config['training'].get('qat_backend', 'fbgemm')  # Default to fbgemm (x86)
 
     # Paths
     models_dir = config['paths']['models_dir']
@@ -293,10 +292,29 @@ def train_model(
         bias=config['model']['bias'],
     )
 
-    model = GPT(model_config)
-    model.to(device)
+    # Create model (QAT or standard)
+    if use_qat:
+        print(f"\n{'='*80}")
+        print("QUANTIZATION-AWARE TRAINING (QAT) ENABLED")
+        print(f"{'='*80}")
+        print(f"Backend: {qat_backend}")
+        print(f"Model will be trained with INT8 quantization awareness")
+        print(f"Final model will be ~4x smaller and ~2x faster")
+        print(f"{'='*80}\n")
+
+        model = GPTQuantized(model_config)
+        model.prepare_qat()
+        model.to(device)
+    else:
+        model = GPT(model_config)
+        model.to(device)
 
     print(f"\nModel parameters: {model.get_num_params() / 1e6:.2f}M")
+    if use_qat:
+        print(f"Training mode: Quantization-Aware Training (QAT)")
+        print(f"  - Forward pass: Simulated INT8 (fake quantization)")
+        print(f"  - Backward pass: Full FP32 (for learning)")
+        print(f"  - After training: Convert to true INT8")
 
     # Resume from checkpoint if specified (BEFORE compilation, so state dict matches)
     start_epoch = 0
@@ -305,12 +323,27 @@ def train_model(
         checkpoint = torch.load(resume_from, map_location=device, weights_only=False)
         state_dict = checkpoint['model_state_dict']
 
+        # Check if checkpoint is QAT-trained
+        checkpoint_is_qat = checkpoint.get('qat_trained', False)
+
+        if checkpoint_is_qat and not use_qat:
+            print("[WARNING] Loading QAT checkpoint into non-QAT model")
+            print("         This may not work correctly. Consider using --use-qat flag.")
+        elif not checkpoint_is_qat and use_qat:
+            print("[INFO] Loading FP32 checkpoint into QAT model")
+            print("       QAT training will continue from FP32 weights")
+
         # Handle both old format (no prefix) and new format (with _orig_mod prefix)
         # If checkpoint has _orig_mod prefix but we're loading into uncompiled model, strip it
         if any(k.startswith('_orig_mod.') for k in state_dict.keys()):
             state_dict = {k.replace('_orig_mod.', ''): v for k, v in state_dict.items()}
 
-        model.load_state_dict(state_dict)
+        # Load state dict (for QAT model, load into wrapped .model)
+        if use_qat:
+            model.model.load_state_dict(state_dict)
+        else:
+            model.load_state_dict(state_dict)
+
         start_epoch = checkpoint['epoch'] + 1
         print(f"Resuming from epoch {start_epoch}")
 
@@ -392,8 +425,8 @@ def train_model(
 
     # Initialize noise schedule
     noise = GeometricNoise(
-        sigma_min=config['noise']['sigma_min'],
-        sigma_max=config['noise']['sigma_max'],
+        sigma_min=config['model']['sigma_min'],
+        sigma_max=config['model']['sigma_max'],
     )
 
     # Training loop with graceful shutdown handling
@@ -456,7 +489,7 @@ def train_model(
                     with torch.amp.autocast('cuda'):
                         loss = loss_function(
                             model, batch, noise, vocab_size,
-                            sampling_eps=config['noise']['sigma_min'],
+                            sampling_eps=config['model']['sigma_min'],
                             loss_weight_mode=loss_weight_mode
                         )
 
@@ -467,7 +500,7 @@ def train_model(
                 else:
                     loss = loss_function(
                         model, batch, noise, vocab_size,
-                        sampling_eps=config['noise']['sigma_min'],
+                        sampling_eps=config['model']['sigma_min'],
                         loss_weight_mode=loss_weight_mode
                     )
 
@@ -512,7 +545,7 @@ def train_model(
                     for batch in val_loader:
                         batch = batch.to(device)
                         loss = loss_function(model, batch, noise, vocab_size,
-                                           sampling_eps=config['noise']['sigma_min'],
+                                           sampling_eps=config['model']['sigma_min'],
                                            loss_weight_mode=loss_weight_mode)
                         val_loss += loss.item()
                         val_batches += 1
@@ -524,7 +557,12 @@ def train_model(
             # Save checkpoint
             if (epoch + 1) % save_interval == 0:
                 # Unwrap compiled model if needed to get clean state_dict
-                model_to_save = model._orig_mod if hasattr(model, '_orig_mod') else model
+                if use_qat:
+                    # For QAT, get the wrapped model
+                    model_to_save = model.model._orig_mod if hasattr(model.model, '_orig_mod') else model.model
+                else:
+                    model_to_save = model._orig_mod if hasattr(model, '_orig_mod') else model
+
                 checkpoint = {
                     'epoch': epoch,
                     'model_state_dict': model_to_save.state_dict(),
@@ -534,10 +572,15 @@ def train_model(
                     'loss': avg_train_loss,
                     'optimizer_mode': 'fused' if use_fused_adamw else 'standard',
                     'loss_weight_mode': loss_weight_mode,
+                    'qat_trained': use_qat,  # Mark if this was QAT training
                 }
                 checkpoint_path = os.path.join(models_dir, f"{dataset_name}_epoch_{epoch+1}.pt")
                 torch.save(checkpoint, checkpoint_path)
-                print(f"Saved checkpoint: {checkpoint_path}\n")
+                print(f"Saved checkpoint: {checkpoint_path}")
+                if use_qat:
+                    print(f"  (QAT checkpoint - model has fake quantization)\n")
+                else:
+                    print()  # Just newline
 
     except KeyboardInterrupt:
         # Second Ctrl+C - force quit
@@ -549,7 +592,10 @@ def train_model(
 
     # Save final or interrupted checkpoint
     # Unwrap compiled model if needed to get clean state_dict
-    model_to_save = model._orig_mod if hasattr(model, '_orig_mod') else model
+    if use_qat:
+        model_to_save = model.model._orig_mod if hasattr(model.model, '_orig_mod') else model.model
+    else:
+        model_to_save = model._orig_mod if hasattr(model, '_orig_mod') else model
 
     if should_stop:
         print("\nSaving interrupted training checkpoint...")
@@ -562,10 +608,13 @@ def train_model(
             'loss': avg_train_loss if num_batches > 0 else float('inf'),
             'optimizer_mode': 'fused' if use_fused_adamw else 'standard',
             'loss_weight_mode': loss_weight_mode,
+            'qat_trained': use_qat,
         }
         interrupted_path = os.path.join(models_dir, f"{dataset_name}_interrupted_epoch_{epoch+1}.pt")
         torch.save(interrupted_checkpoint, interrupted_path)
         print(f"Interrupted checkpoint saved to: {interrupted_path}")
+        if use_qat:
+            print("  (QAT checkpoint - contains fake quantization)")
         print("You can resume training with: python train.py --dataset {dataset_name} --resume {interrupted_path}")
     else:
         # Normal completion - save final model
@@ -578,9 +627,22 @@ def train_model(
             'loss': avg_train_loss,
             'optimizer_mode': 'fused' if use_fused_adamw else 'standard',
             'loss_weight_mode': loss_weight_mode,
+            'qat_trained': use_qat,
         }
         torch.save(final_checkpoint, model_path)
         print(f"\nTraining completed! Final model saved to: {model_path}")
+
+        if use_qat:
+            print(f"\n{'='*80}")
+            print("QAT TRAINING COMPLETE")
+            print(f"{'='*80}")
+            print(f"Model trained with quantization awareness.")
+            print(f"The checkpoint contains fake quantization modules.")
+            print(f"\nTo convert to true INT8 and export to ONNX:")
+            print(f"  python scripts/art-piece/export_to_onnx.py \\")
+            print(f"    --model {model_path} \\")
+            print(f"    --dataset {dataset_name}")
+            print(f"{'='*80}\n")
 
 
 def main():

@@ -265,7 +265,18 @@ if __name__ == '__main__':
 
     # Generate default model path if not specified
     if args.model is None:
-        args.model = os.path.join(PROJECT_ROOT, 'models', f'{args.dataset}_model.onnx')
+        # Prefer quantized model if it exists
+        quantized_path = os.path.join(PROJECT_ROOT, 'models', f'{args.dataset}_model_quantized.onnx')
+        non_quantized_path = os.path.join(PROJECT_ROOT, 'models', f'{args.dataset}_model.onnx')
+
+        if os.path.exists(quantized_path):
+            args.model = quantized_path
+            print(f"Using quantized model: {quantized_path}")
+        elif os.path.exists(non_quantized_path):
+            args.model = non_quantized_path
+            print(f"Using non-quantized model: {non_quantized_path}")
+        else:
+            args.model = non_quantized_path  # Will fail later with better error
 
     success = update_model(args.dataset, args.model, force=args.force)
     sys.exit(0 if success else 1)
