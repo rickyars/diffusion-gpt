@@ -7,10 +7,7 @@ It reads from the template, loads the model and vocabulary, and injects them
 into the HTML while preserving all your manual edits.
 
 Usage:
-    python update_model.py --model path/to/model.onnx --dataset dataset_name
-
-    python update_model.py
-        (uses defaults: models/confessions_model.onnx, confessions)
+    python update_model.py --model models/model.onnx --vocab vocab/confessions_vocab.json
 """
 
 import argparse
@@ -25,14 +22,18 @@ TEMPLATE_PATH = os.path.join(SCRIPT_DIR, 'we.template.html')
 OUTPUT_PATH = os.path.join(SCRIPT_DIR, 'we.html')
 
 
-def load_vocab(dataset_name):
-    """Load vocabulary JSON file."""
-    vocab_path = os.path.join(PROJECT_ROOT, 'vocab', f'{dataset_name}_vocab.json')
+def load_vocab(vocab_path):
+    """Load vocabulary from JSON or pickle file."""
     if not os.path.exists(vocab_path):
         raise FileNotFoundError(f"Vocabulary not found: {vocab_path}")
 
-    with open(vocab_path, 'r', encoding='utf-8') as f:
-        vocab = json.load(f)
+    if vocab_path.endswith('.pkl'):
+        import pickle
+        with open(vocab_path, 'rb') as f:
+            vocab = pickle.load(f)
+    else:
+        with open(vocab_path, 'r', encoding='utf-8') as f:
+            vocab = json.load(f)
 
     if 'itos' not in vocab or 'stoi' not in vocab:
         raise ValueError(f"Vocabulary missing 'itos' and 'stoi' keys: {vocab_path}")
@@ -143,13 +144,13 @@ def create_backup(file_path):
     return None
 
 
-def update_model(dataset_name, model_path, force=False):
+def update_model(model_path, vocab_path, force=False):
     """Generate we.html from template with new model data."""
 
     print("Updating WE art piece with new model...")
     print("="*60)
-    print(f"Dataset: {dataset_name}")
     print(f"Model: {model_path}")
+    print(f"Vocab: {vocab_path}")
     print("="*60)
 
     # Load template
@@ -190,7 +191,7 @@ def update_model(dataset_name, model_path, force=False):
 
     # Load vocabulary
     print("Loading vocabulary...")
-    vocab = load_vocab(dataset_name)
+    vocab = load_vocab(vocab_path)
     vocab_json = json.dumps(vocab)
     print(f"  Vocabulary size: {len(vocab.get('itos', {}))} characters")
 
@@ -244,16 +245,16 @@ if __name__ == '__main__':
         description='Update WE art piece with new model data'
     )
     parser.add_argument(
-        '--dataset',
-        type=str,
-        default='confessions',
-        help='Dataset name for vocabulary (default: confessions)'
-    )
-    parser.add_argument(
         '--model',
         type=str,
-        default=None,
-        help='Path to ONNX model (default: models/{dataset}_model.onnx)'
+        required=True,
+        help='Path to ONNX model (e.g., models/model.onnx)'
+    )
+    parser.add_argument(
+        '--vocab',
+        type=str,
+        required=True,
+        help='Path to vocabulary JSON file (e.g., vocab/confessions_vocab.json)'
     )
     parser.add_argument(
         '--force',
@@ -263,20 +264,5 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    # Generate default model path if not specified
-    if args.model is None:
-        # Prefer quantized model if it exists
-        quantized_path = os.path.join(PROJECT_ROOT, 'models', f'{args.dataset}_model_quantized.onnx')
-        non_quantized_path = os.path.join(PROJECT_ROOT, 'models', f'{args.dataset}_model.onnx')
-
-        if os.path.exists(quantized_path):
-            args.model = quantized_path
-            print(f"Using quantized model: {quantized_path}")
-        elif os.path.exists(non_quantized_path):
-            args.model = non_quantized_path
-            print(f"Using non-quantized model: {non_quantized_path}")
-        else:
-            args.model = non_quantized_path  # Will fail later with better error
-
-    success = update_model(args.dataset, args.model, force=args.force)
+    success = update_model(args.model, args.vocab, force=args.force)
     sys.exit(0 if success else 1)

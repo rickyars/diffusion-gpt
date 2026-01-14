@@ -135,11 +135,7 @@ class WEAttendApp {
     // WebGL 2.0 only (required for CRT effects)
     this.gl = this.glCanvas.getContext('webgl2', { alpha: false, antialias: false });
 
-    if (!this.gl) {
-      console.error('WebGL 2.0 not supported - CRT effects will be disabled');
-    } else {
-      console.log('Using WebGL 2.0');
-    }
+    // WebGL 2.0 is required for CRT effects
 
     this.state = States.VOID;
     this.stateTime = 0;
@@ -160,8 +156,6 @@ class WEAttendApp {
   }
 
   async init() {
-    console.log('WE - Initializing...');
-
     this.resize();
     window.addEventListener('resize', () => this.resize());
 
@@ -179,25 +173,16 @@ class WEAttendApp {
 
   async loadModel() {
     try {
-      console.log('Decoding model base64...');
       const modelBytes = base64ToUint8Array(MODEL_BASE64);
-      console.log(`Model bytes: ${modelBytes.length} bytes`);
-
-      console.log('Initializing inference engine...');
       this.inferenceEngine = new DiffusionInferenceEngine(
         modelBytes,
         VOCAB,
         MODEL_CONFIG
       );
-
       await this.inferenceEngine.init();
-
       this.modelLoaded = true;
-      console.log('✓ Model loaded successfully!');
     } catch (error) {
-      console.error('✗ Model load failed:', error);
       document.getElementById('overlay').textContent = 'ERROR: ' + error.message;
-      // Keep overlay visible on error
     }
   }
 
@@ -227,17 +212,8 @@ class WEAttendApp {
     this.lastTime = time;
 
     if (!this.modelLoaded || !this.firstInteraction) {
-      if (!this._loggedBlocked) {
-        console.log(`Loop blocked: modelLoaded=${this.modelLoaded}, firstInteraction=${this.firstInteraction}`);
-        this._loggedBlocked = true;
-      }
       requestAnimationFrame((t) => this.loop(t));
       return;
-    }
-
-    if (!this._loggedRunning) {
-      console.log('✓ Render loop running');
-      this._loggedRunning = true;
     }
 
     this.updateState(deltaTime);
@@ -299,7 +275,6 @@ class WEAttendApp {
   }
 
   transitionTo(newState) {
-    console.log(`${this.state} -> ${newState}`);
     this.state = newState;
     this.stateTime = 0;
 
@@ -309,36 +284,25 @@ class WEAttendApp {
     }
 
     if (newState === States.CONF_GENERATING) {
-      this.generationStarted = false;  // Reset for new generation cycle
+      this.generationStarted = false;
       this.nextGenerationStarted = false;
-      this.currentConfession = null;  // Clear old confession to avoid brief reappearance
-      this.diffusionFrames = [];  // Also clear frames to ensure blank canvas
-      console.log('🔄 Transitioning to CONF_GENERATING: cleared currentConfession and diffusionFrames');
+      this.currentConfession = null;
+      this.diffusionFrames = [];
     }
   }
 
   async startGeneration() {
-    // If already generating, don't interrupt - let it finish
-    if (this.isBuffering) {
-      console.log('⏳ Already generating, waiting for completion...');
-      return;
-    }
-
-    console.log(`▶ Starting real-time generation: ${DIFFUSION_CONFIG.TOTAL_STEPS} steps`);
+    if (this.isBuffering) return;
 
     try {
-      this.diffusionFrames = [];  // Stream directly to display (real-time)
-      this.frameCounter = 0;  // Track which step we're on
+      this.diffusionFrames = [];
+      this.frameCounter = 0;
       this.isBuffering = true;
       this.isGenerating = true;
       this.confessionGenerator = this.inferenceEngine.generateStream(256, DIFFUSION_CONFIG.TOTAL_STEPS);
-      this.playbackStartTime = performance.now();  // Start playback timer immediately
-
-      // Start real-time generation loop
+      this.playbackStartTime = performance.now();
       this.generateNextFrame();
-
     } catch (error) {
-      console.error('✗ Generation failed:', error);
       this.isBuffering = false;
     }
   }
@@ -350,33 +314,19 @@ class WEAttendApp {
       const result = await this.confessionGenerator.next();
 
       if (!result.done && this.isBuffering) {
-        // Stream frame directly to display - renders immediately
         this.diffusionFrames.push(result.value.text);
-
-        // Log progress
-        const frameCount = this.diffusionFrames.length;
-        if (frameCount % 10 === 0 || frameCount < 5) {
-          console.log(`Generated ${frameCount} frames (step ${this.frameCounter}/${DIFFUSION_CONFIG.TOTAL_STEPS})...`);
-        }
-
         this.frameCounter++;
-
-        // Continue immediately - let rendering happen naturally in loop()
         setTimeout(() => this.generateNextFrame(), 0);
       } else {
-        // Generation complete!
-        console.log(`✓ Generation complete! ${this.diffusionFrames.length} frames generated`);
         this.isBuffering = false;
         this.isGenerating = false;
         this.confessionGenerator = null;
 
-        // Transition to hold state immediately (show final text)
         if (this.state === States.CONF_GENERATING) {
           this.transitionTo(States.CONF_HOLD);
         }
       }
     } catch (error) {
-      console.error('✗ Generation failed:', error);
       this.isBuffering = false;
       this.isGenerating = false;
     }
@@ -664,8 +614,6 @@ class WEAttendApp {
     if (!this.webglReady) {
       // WebGL 2.0 failed - fall back to showing text canvas directly
       if (this.textCanvas.style.display === 'none') {
-        console.warn('WebGL 2.0 not available. Falling back to direct canvas rendering.');
-        console.warn('For best experience, use a browser that supports WebGL 2.0.');
         this.textCanvas.style.display = 'block';
         this.textCanvas.style.zIndex = '10';
         this.glCanvas.style.display = 'none';
@@ -750,14 +698,11 @@ class WEAttendApp {
     const gl = this.gl;
 
     if (!gl) {
-      console.error('WebGL 2.0 not supported. CRT effects will be disabled.');
-      console.error('Browser/GPU must support WebGL 2.0 for visual effects.');
       this.webglReady = false;
       return;
     }
 
     try {
-      console.log('Initializing WebGL CRT effects...');
 
     // WebGL 2.0 vertex shader (GLSL ES 3.00)
     const vertexShaderSource = `#version 300 es
@@ -999,7 +944,6 @@ class WEAttendApp {
       gl.compileShader(shader);
 
       if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-        console.error('Shader compile error:', gl.getShaderInfoLog(shader));
         gl.deleteShader(shader);
         return null;
       }
@@ -1021,7 +965,6 @@ class WEAttendApp {
       gl.linkProgram(program);
 
       if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-        console.error('Program link error:', gl.getProgramInfoLog(program));
         return null;
       }
 
@@ -1034,7 +977,6 @@ class WEAttendApp {
     this.crtProgram = createProgram(vertexShaderSource, crtFragmentSource);
 
     if (!this.brightPassProgram || !this.blurProgram || !this.crtProgram) {
-      console.error('Failed to create shader programs');
       this.webglReady = false;
       return;
     }
@@ -1105,7 +1047,6 @@ class WEAttendApp {
 
     // Validate framebuffer
     if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-      console.error('Bloom framebuffer incomplete:', gl.checkFramebufferStatus(gl.FRAMEBUFFER));
       throw new Error('Failed to create bloom framebuffer');
     }
 
@@ -1124,7 +1065,6 @@ class WEAttendApp {
 
     // Validate framebuffer
     if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-      console.error('Blur framebuffer incomplete:', gl.checkFramebufferStatus(gl.FRAMEBUFFER));
       throw new Error('Failed to create blur framebuffer');
     }
 
@@ -1134,13 +1074,8 @@ class WEAttendApp {
     gl.bindVertexArray(null);
 
       this.webglReady = true;
-      console.log('WebGL CRT effects initialized successfully');
     } catch (error) {
-      console.error('WebGL initialization failed:', error);
-      console.log('Falling back to direct canvas rendering (no CRT effects)');
       this.webglReady = false;
-
-      // Show text canvas directly
       this.textCanvas.style.display = 'block';
       this.textCanvas.style.zIndex = '10';
       this.glCanvas.style.display = 'none';

@@ -29,7 +29,12 @@
       "Bash(python:*)",
       "Bash(git clone:*)",
       "Bash(git commit:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:microsoft.github.io)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(olive run:*)"
     ]
   }
 }

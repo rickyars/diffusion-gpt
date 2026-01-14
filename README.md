@@ -22,20 +22,20 @@ Based on the paper: [Discrete Diffusion Modeling by Estimating the Ratios of the
 ```
 diffusion-gpt/
 ├── config.yaml                 # Training configuration
-├── model.py                    # Model architecture
-├── utils.py                    # Helper functions
+├── olive_config.json           # Microsoft Olive optimization config
 ├── requirements.txt            # Python dependencies
 ├── scripts/
 │   ├── training/               # Training pipeline
 │   │   ├── train.py            # Main training script
+│   │   ├── model.py            # Model architecture
 │   │   ├── generate.py         # Text generation
 │   │   ├── dataset_loader.py   # Dataset utilities
 │   │   └── generate_animation.py  # Denoising visualization
 │   └── art-piece/              # WE art installation
-│       ├── build.py            # Build HTML with embedded model
-│       ├── export_to_onnx.py   # PyTorch → ONNX converter
-│       ├── merge_onnx_data.py  # Merge ONNX external data
-│       └── we.html             # Self-contained art piece (~60MB)
+│       ├── olive_model_loader.py  # Olive model loader functions
+│       ├── update_model.py     # Build HTML with embedded model
+│       ├── export_to_onnx.py   # Manual ONNX export (alternative)
+│       └── we.html             # Self-contained art piece (~15MB)
 ├── datasets/                   # Place your .txt files here
 │   └── shakespeare.txt
 ├── models/                     # Saved model checkpoints
@@ -145,50 +145,46 @@ The art piece is a self-contained HTML file with:
 
 #### Full Workflow
 
-**1. Export PyTorch model to ONNX:**
+**1. Optimize PyTorch model with Microsoft Olive:**
+
+Install Olive (one-time):
 ```bash
-python scripts/art-piece/export_to_onnx.py \
-  --model models/confessions_epoch_25.pt \
-  --dataset confessions
+pip install olive-ai
 ```
 
-**2. Merge ONNX data (if .onnx.data file exists):**
+Update `olive_config.json` with your model path, then run:
 ```bash
-python scripts/art-piece/merge_onnx_data.py \
-  --input models/confessions_model.onnx
+olive run --config olive_config.json
 ```
 
-**3. Build HTML art piece:**
+This converts PyTorch → ONNX with INT8 quantization (~90% size reduction).
+
+**2. Build HTML art piece:**
 ```bash
-python scripts/art-piece/build.py --dataset confessions
+python scripts/art-piece/update_model.py \
+  --model models/model.onnx \
+  --vocab vocab/confessions_vocab.json
 ```
 
-Or use defaults (confessions dataset):
-```bash
-python scripts/art-piece/build.py
-```
-
-**4. Open in browser:**
+**3. Open in browser:**
 ```bash
 start scripts/art-piece/we.html
 ```
 
-#### Using Different Training Epochs
+#### Manual Export (Alternative)
 
-To build the art piece with a specific training epoch:
+If you need more control, you can use the manual export script:
 
 ```bash
-# Export epoch 15
+# Export to ONNX
 python scripts/art-piece/export_to_onnx.py \
-  --model models/confessions_epoch_15.pt \
+  --model models/confessions_epoch_25.pt \
   --dataset confessions
 
-# Merge if needed
-python scripts/art-piece/merge_onnx_data.py \
-  --input models/confessions_model.onnx
-
-# Build
-python scripts/art-piece/build.py --dataset confessions
+# Build HTML
+python scripts/art-piece/update_model.py \
+  --model models/confessions_model.onnx \
+  --vocab vocab/confessions_vocab.json
 ```
 
 #### Custom Model Path

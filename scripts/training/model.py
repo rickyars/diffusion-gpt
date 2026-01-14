@@ -281,8 +281,11 @@ class GPT(nn.Module):
         device = idx.device
         b, t = idx.size()
         c = F.silu(self.sigma_map(sigma))
-        assert t <= self.config.block_size, \
-            f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
+        # Note: Skip assertion during ONNX tracing since t becomes a traced value.
+        # The block_size constraint is enforced at the application level.
+        if not torch.jit.is_tracing():
+            assert t <= self.config.block_size, \
+                f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
         pos = torch.arange(0, t, dtype=torch.long, device=device)  # shape (t)
 
         # forward the GPT model itself
