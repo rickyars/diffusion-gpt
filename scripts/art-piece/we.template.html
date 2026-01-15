@@ -135,6 +135,7 @@ const EFFECT_CONFIG = {
     shadowBlur: 0.25,          // Shadow blur as fraction of font size
     shadowColor: '#33ff33',    // Phosphor green
     textColorRGB: '51, 255, 51',  // RGB values for text (opacity applied separately)
+    headerFontSize: 3,        // ASCII art header font size in pixels (adjust to scale the header)
     flickerEnabled: true,     // Screen brightness flicker
     flickerIntensity: 0.5,     // How strong the flicker is (0-1)
     flickerSpeed: 8.0,         // Base flicker frequency
@@ -624,9 +625,27 @@ class WEAttendApp {
     this.textCtx.shadowColor = config.shadowColor;
     this.textCtx.shadowBlur = fontSize * config.shadowBlur;
 
+    // ASCII header art
+    const headerLines = [
+'             ╓',
+'     ,▄P▀╙  ▄██▄,                              ╓█                                          ╓▌',
+'   ▄██═,▄▄█▌███▀└                          ╓▄▄▀████▄∞                                    ¬████▄',
+' ,███▀▀████▌ █▌                             ▀██`██                                        ▀█`',
+' ████⌐ ████▌ ▐▌        ▄█,      ▄▄    ▄▄     ███ ¬▌        ▄█         ╓█▄          ▄█      ,▌        ▄█µ      ▄▄    ▄▄',
+'█████⌐ ████▌ └    ▄▄▄█▀█████▄ <████▄∞████▄ ▀▀███▀▀▌  -▄▄▄█▀████⌐.▄▄▄█▀████W  ╓▄▄▄▌▀████∞ ¬▄███▄ ▄▄▄█▀█████▄ <████▄∞████▄',
+'█████⌐ ████▌       ███` ╙███   ▐██▌  ▐███   ¬███  "   "███  ▀█▌  ▐███  ╙▀     ███▌  ▀▀    ▐███   ███═ "███⌐  ▐██▌  ▐███',
+'█████⌐ ████▌ⁿ╙▀▄   ██`   ███   ▐██▌  ▐██▌   ¬███       ███`,█▀   ▐████▄▄▄██   ████N▄▄▄█▌  j███   ███═  ███   ▐██▌  ▐██▌',
+' ████▌ █████Nw  █  ███µ  ███   ▐██▌  ▐██▌   ]███       ███▀            ▐███   "     ███▌  ▐███   ███▄  ███   ▐██▌  ▐██▌',
+'  ▀███▄█▀-      █ Æ████▄;███▌ ▄████▄╓████▄ ╓█████▄▄. .▓████▄▄;,  ╓▄██▄ ▐███▄  ▄▄██▄ ████ ╓████▄ Æ████▄ç████ ╓████▄╓████▄',
+'   -▀███▄    ╓▄▀    ¬▀██▀-     ╙██"  "██╙    ╙██▀       ╙▀██▀   █▀▀▀██▀`    █▀▀███▀"     `██▀    -▀██▀-     ╙██╙  \'██▀',
+'      -▀▀▀▀▀▀¬                                                                   `',
+    ];
+
     // Draw function for reuse with RGB split
     const drawConfession = (offsetX, offsetY) => {
       this.renderConfessionText(text, w, h, fontSize, offsetX, offsetY);
+      // Draw header above the confession text
+      this.renderHeader(headerLines, w, h, config.headerFontSize, offsetX, offsetY);
     };
 
     // Occasional RGB channel split
@@ -691,6 +710,45 @@ class WEAttendApp {
       const y = startY + i * lineHeight + lineHeight / 2;
       this.textCtx.fillText(line, w / 2 + offsetX, y + offsetY);
     });
+  }
+
+  renderHeader(headerLines, w, h, headerFontSize, offsetX, offsetY) {
+    // Calculate confession layout (must match renderConfessionText)
+    const confessionFontSize = Math.max(18, h * 0.028);
+    const confessionLineHeight = confessionFontSize * 1.5;
+    const confessionHeight = 8 * confessionLineHeight;
+    const confessionStartY = (h - confessionHeight) / 2;
+
+    // Header layout
+    const headerLineHeight = headerFontSize * 1.2;
+    const headerTotalHeight = headerLines.length * headerLineHeight;
+
+    // Position header above confession with gap
+    const gap = confessionFontSize * 0.5;
+    const headerStartY = confessionStartY - headerTotalHeight - gap;
+
+    this.textCtx.save();
+    this.textCtx.font = `${headerFontSize}px 'Courier New', monospace`;
+    this.textCtx.textAlign = 'left';  // Left-align for ASCII art
+    // Scale shadow to header size (inherits color and fillStyle from parent)
+    this.textCtx.shadowBlur = headerFontSize * 0.25;
+
+    // Find widest line to center the block
+    let maxWidth = 0;
+    headerLines.forEach(line => {
+      const lineWidth = this.textCtx.measureText(line).width;
+      if (lineWidth > maxWidth) maxWidth = lineWidth;
+    });
+
+    // Center the entire block horizontally
+    const blockStartX = (w - maxWidth) / 2;
+
+    headerLines.forEach((line, i) => {
+      const y = headerStartY + i * headerLineHeight;
+      this.textCtx.fillText(line, blockStartX + offsetX, y + offsetY);
+    });
+
+    this.textCtx.restore();
   }
 
   renderHighlightChanges(text, prevText, w, h, fontSize, opacity, offsetX, offsetY) {
