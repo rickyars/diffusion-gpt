@@ -134,7 +134,7 @@ const EFFECT_CONFIG = {
     rgbSplitOffset: 2,         // Pixels of RGB channel separation
     shadowBlur: 0.25,          // Shadow blur as fraction of font size
     shadowColor: '#33ff33',    // Phosphor green
-    textColor: 'rgba(51, 255, 51, 1.0)',
+    textColorRGB: '51, 255, 51',  // RGB values for text (opacity applied separately)
     flickerEnabled: true,     // Screen brightness flicker
     flickerIntensity: 0.5,     // How strong the flicker is (0-1)
     flickerSpeed: 8.0,         // Base flicker frequency
@@ -291,6 +291,10 @@ class WEAttendApp {
     return Math.random() < config.rgbSplitChance;
   }
 
+  getTextColor(config, opacity) {
+    return `rgba(${config.textColorRGB}, ${opacity})`;
+  }
+
   renderWithRGBSplit(config, glitchOffset, drawFn) {
     const offset = config.rgbSplitOffset;
 
@@ -306,7 +310,7 @@ class WEAttendApp {
   setupTextStyle(config, fontSize, opacity = 1.0) {
     this.textCtx.shadowColor = config.shadowColor;
     this.textCtx.shadowBlur = fontSize * config.shadowBlur;
-    this.textCtx.fillStyle = config.textColor.replace('1.0)', `${opacity})`);
+    this.textCtx.fillStyle = this.getTextColor(config, opacity);
   }
 
   loop(time) {
@@ -541,7 +545,7 @@ class WEAttendApp {
     }
 
     // Draw main green channel
-    this.textCtx.fillStyle = `rgba(51, 255, 51, ${alpha})`;
+    this.textCtx.fillStyle = this.getTextColor(config, alpha);
     drawWE(glitchOffset.x, glitchOffset.y);
 
     this.textCtx.restore();
@@ -592,7 +596,7 @@ class WEAttendApp {
     }
 
     // Draw main green channel
-    this.textCtx.fillStyle = `rgba(51, 255, 51, ${opacity})`;
+    this.textCtx.fillStyle = this.getTextColor(config, opacity);
     drawText(glitchOffset.x, glitchOffset.y);
 
     this.textCtx.restore();
@@ -637,7 +641,7 @@ class WEAttendApp {
     }
 
     // Draw main green channel
-    this.textCtx.fillStyle = `rgba(51, 255, 51, ${effectiveOpacity})`;
+    this.textCtx.fillStyle = this.getTextColor(config, effectiveOpacity);
     drawConfession(glitchOffset.x, glitchOffset.y);
 
     // Overlay highlighting for changed characters (yellow glow on changes)
@@ -650,7 +654,7 @@ class WEAttendApp {
       const progressFontSize = h * 0.02;
       this.textCtx.font = `${progressFontSize}px 'Courier New', monospace`;
       this.textCtx.textBaseline = 'top';
-      this.textCtx.fillStyle = `rgba(51, 255, 51, ${0.5 * flickerMult})`;
+      this.textCtx.fillStyle = this.getTextColor(config, 0.5 * flickerMult);
 
       // Build ASCII progress bar
       const totalSteps = DIFFUSION_CONFIG.TOTAL_STEPS;
