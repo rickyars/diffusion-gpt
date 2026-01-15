@@ -126,6 +126,43 @@ const TIMING = {
   CONF_FADE: 4000  // 4 seconds slow fade
 };
 
+// Effect configuration with per-state overrides
+const EFFECT_CONFIG = {
+  default: {
+    glitchIntensity: 0.003,    // Base jitter amount (multiplied by canvas width/height)
+    rgbSplitChance: 0.05,      // 5% chance per frame
+    rgbSplitOffset: 2,         // Pixels of RGB channel separation
+    shadowBlur: 0.25,          // Shadow blur as fraction of font size
+    shadowColor: '#33ff33',    // Phosphor green
+    textColor: 'rgba(51, 255, 51, 1.0)',
+    flickerEnabled: true,     // Screen brightness flicker
+    flickerIntensity: 0.5,     // How strong the flicker is (0-1)
+    flickerSpeed: 8.0,         // Base flicker frequency
+  },
+  VOID: {
+    // No rendering in void state
+  },
+  WE_FADEIN: {
+
+  },
+  WE_HOLD: {
+    glitchIntensity: 0.005,    // More jitter when holding
+  },
+  WE_DISSOLVE: {
+    glitchIntensity: 0.005,    // Same jitter as hold
+    rgbSplitChance: 0.08,      // More RGB splits during dissolve
+  },
+  CONF_GENERATING: {
+    glitchIntensity: 0.001,
+  },
+  CONF_HOLD: {
+    glitchIntensity: 0.001,
+  },
+  CONF_FADE: {
+    glitchIntensity: 0.001,
+  },
+};
+
 class WEAttendApp {
   constructor() {
     this.textCanvas = document.getElementById('textCanvas');
@@ -207,6 +244,71 @@ class WEAttendApp {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // Effect Helpers
+  // -------------------------------------------------------------------------
+
+  getEffectConfig(state = this.state) {
+    const stateKey = state.replace('States.', '');
+    return { ...EFFECT_CONFIG.default, ...EFFECT_CONFIG[stateKey] };
+  }
+
+  calcGlitchOffset(config, w, h) {
+    const intensity = config.glitchIntensity;
+    return {
+      x: (Math.random() - 0.5) * intensity * w,
+      y: (Math.random() - 0.5) * intensity * h
+    };
+  }
+
+  applyFlicker(config, time) {
+    if (!config.flickerEnabled || config.flickerIntensity <= 0) {
+      return 1.0;
+    }
+
+    const speed = config.flickerSpeed;
+    const intensity = config.flickerIntensity;
+
+    // Multi-frequency flicker for organic CRT feel
+    let flicker = Math.sin(time * speed) * 0.4 +
+                  Math.sin(time * speed * 1.7) * 0.3 +
+                  Math.sin(time * speed * 3.1) * 0.2 +
+                  Math.sin(time * speed * 7.3) * 0.1;
+
+    // Normalize to 0-1 range then scale by intensity
+    flicker = (flicker + 1.0) * 0.5;  // Now 0-1
+    flicker = 1.0 - (intensity * (1.0 - flicker));  // Apply intensity
+
+    // Occasional random brightness dips (like old CRT power fluctuations)
+    if (Math.random() < 0.01) {
+      flicker *= 0.85 + Math.random() * 0.1;
+    }
+
+    return flicker;
+  }
+
+  shouldApplyRGBSplit(config) {
+    return Math.random() < config.rgbSplitChance;
+  }
+
+  renderWithRGBSplit(config, glitchOffset, drawFn) {
+    const offset = config.rgbSplitOffset;
+
+    // Red channel offset
+    this.textCtx.fillStyle = `rgba(255, 0, 0, 0.3)`;
+    drawFn(glitchOffset.x - offset, glitchOffset.y);
+
+    // Blue channel offset
+    this.textCtx.fillStyle = `rgba(0, 0, 255, 0.3)`;
+    drawFn(glitchOffset.x + offset, glitchOffset.y);
+  }
+
+  setupTextStyle(config, fontSize, opacity = 1.0) {
+    this.textCtx.shadowColor = config.shadowColor;
+    this.textCtx.shadowBlur = fontSize * config.shadowBlur;
+    this.textCtx.fillStyle = config.textColor.replace('1.0)', `${opacity})`);
+  }
+
   loop(time) {
     const deltaTime = time - this.lastTime;
     this.lastTime = time;
@@ -268,7 +370,7 @@ class WEAttendApp {
       case States.CONF_FADE:
         if (this.stateTime > TIMING.CONF_FADE) {
           // Fade complete - start next generation cycle
-          this.transitionTo(States.CONF_GENERATING);
+          this.transitionTo(States.WE_FADEIN);
         }
         break;
     }
@@ -349,7 +451,6 @@ class WEAttendApp {
       case States.CONF_GENERATING:
         // Display generated frames in real-time as they're created
         if (this.diffusionFrames && this.diffusionFrames.length > 0) {
-          // Show the latest frame while generating
           const currentText = this.diffusionFrames[this.diffusionFrames.length - 1];
           const prevText = this.diffusionFrames.length > 1
             ? this.diffusionFrames[this.diffusionFrames.length - 2]
@@ -358,19 +459,8 @@ class WEAttendApp {
           // Render with slight opacity pulse to show it's updating
           const updatePulse = (Math.sin(time * 0.01) + 1) * 0.5;
           const opacity = 0.85 + updatePulse * 0.15; // 0.85-1.0 pulse
-          this.renderConfession(currentText, opacity, prevText);
-
-          // Show step counter below the text
-          this.textCtx.save();
-          this.textCtx.fillStyle = 'rgba(51, 255, 51, 0.5)';
-          this.textCtx.font = `${h * 0.02}px 'Courier New', monospace`;
-          this.textCtx.textAlign = 'center';
-          this.textCtx.textBaseline = 'top';
-          const stepText = `step ${this.frameCounter}/${DIFFUSION_CONFIG.TOTAL_STEPS}`;
-          this.textCtx.fillText(stepText, w / 2, h / 2 + h * 0.22);
-          this.textCtx.restore();
+          this.renderConfession(currentText, opacity, time, prevText, true);
         }
-        // Waiting for frames - ensure nothing is rendered (canvas already cleared black above)
         break;
 
       case States.WE_FADEIN:
@@ -382,7 +472,7 @@ class WEAttendApp {
         break;
 
       case States.WE_DISSOLVE:
-        this.renderWEDissolve(this.stateTime / TIMING.WE_DISSOLVE);
+        this.renderWEDissolve(this.stateTime / TIMING.WE_DISSOLVE, time);
         break;
 
       case States.CONF_HOLD:
@@ -392,7 +482,7 @@ class WEAttendApp {
           const prevText = this.diffusionFrames.length > 1
             ? this.diffusionFrames[this.diffusionFrames.length - 2]
             : null;
-          this.renderConfession(currentText, 1.0, prevText);
+          this.renderConfession(currentText, 1.0, time, prevText);
           // Save for later use in CONF_FADE
           this.currentConfession = { text: currentText };
         }
@@ -403,7 +493,7 @@ class WEAttendApp {
         if (this.currentConfession) {
           const opacity = 1.0 - (this.stateTime / TIMING.CONF_FADE);
           if (opacity > 0) {
-            this.renderConfession(this.currentConfession.text, opacity);
+            this.renderConfession(this.currentConfession.text, opacity, time);
           }
         }
         break;
@@ -416,14 +506,17 @@ class WEAttendApp {
   renderWE(opacity, time) {
     const w = window.innerWidth;
     const h = window.innerHeight;
+    const config = this.getEffectConfig();
 
+    // Apply flicker effect
+    const flickerMult = this.applyFlicker(config, time / 1000);
+
+    // Pulse effect for brightness variation
     const pulse = Math.sin(time * 0.0015) * 0.15;
-    const brightness = 1.0 + pulse;
+    const brightness = (1.0 + pulse) * flickerMult;
 
-    // Add glitch effect - occasional random jitter
-    const glitchIntensity = this.state === States.WE_HOLD ? 0.005 : 0;
-    const glitchX = (Math.random() - 0.5) * glitchIntensity * w;
-    const glitchY = (Math.random() - 0.5) * glitchIntensity * h;
+    // Calculate glitch offset using config
+    const glitchOffset = this.calcGlitchOffset(config, w, h);
 
     this.textCtx.save();
     this.textCtx.textAlign = 'center';
@@ -432,32 +525,40 @@ class WEAttendApp {
     const fontSize = h * 0.2;  // Large, prominent text
     this.textCtx.font = `900 ${fontSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif`;
 
-    this.textCtx.shadowColor = '#33ff33';
+    this.textCtx.shadowColor = config.shadowColor;
     this.textCtx.shadowBlur = fontSize * 0.3;
 
     const alpha = Math.min(1.0, opacity * brightness);
-    this.textCtx.fillStyle = `rgba(51, 255, 51, ${alpha})`;
+
+    // Draw function for reuse with RGB split
+    const drawWE = (offsetX, offsetY) => {
+      this.textCtx.fillText('WE', w / 2 + offsetX, h / 2 + offsetY);
+    };
 
     // Occasional RGB channel split glitch
-    if (this.state === States.WE_HOLD && Math.random() < 0.05) {
-      // Draw red channel offset
-      this.textCtx.fillStyle = `rgba(255, 0, 0, ${alpha * 0.3})`;
-      this.textCtx.fillText('WE', w / 2 - 2 + glitchX, h / 2 + glitchY);
-      // Draw blue channel offset
-      this.textCtx.fillStyle = `rgba(0, 0, 255, ${alpha * 0.3})`;
-      this.textCtx.fillText('WE', w / 2 + 2 + glitchX, h / 2 + glitchY);
-      // Draw main green channel
-      this.textCtx.fillStyle = `rgba(51, 255, 51, ${alpha})`;
+    if (this.shouldApplyRGBSplit(config)) {
+      this.renderWithRGBSplit(config, glitchOffset, drawWE);
     }
 
-    this.textCtx.fillText('WE', w / 2 + glitchX, h / 2 + glitchY);
+    // Draw main green channel
+    this.textCtx.fillStyle = `rgba(51, 255, 51, ${alpha})`;
+    drawWE(glitchOffset.x, glitchOffset.y);
+
     this.textCtx.restore();
   }
 
-  renderWEDissolve(progress) {
+  renderWEDissolve(progress, time) {
     const w = window.innerWidth;
     const h = window.innerHeight;
-    const opacity = 1.0 - progress;
+    const config = this.getEffectConfig();
+
+    // Apply flicker effect
+    const flickerMult = this.applyFlicker(config, time / 1000);
+
+    const opacity = (1.0 - progress) * flickerMult;
+
+    // Calculate glitch offset using config
+    const glitchOffset = this.calcGlitchOffset(config, w, h);
 
     this.textCtx.save();
     this.textCtx.textAlign = 'center';
@@ -466,14 +567,10 @@ class WEAttendApp {
     const fontSize = h * 0.2;  // Match larger WE size
     this.textCtx.font = `900 ${fontSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif`;
 
-    // Add glitch effect - same as WE_HOLD
-    const glitchIntensity = 0.005;
-    const glitchX = (Math.random() - 0.5) * glitchIntensity * w;
-    const glitchY = (Math.random() - 0.5) * glitchIntensity * h;
-
-    this.textCtx.shadowColor = '#33ff33';
+    this.textCtx.shadowColor = config.shadowColor;
     this.textCtx.shadowBlur = fontSize * 0.3;
 
+    // Determine text (with character glitching during dissolve)
     let text = 'WE';
     // Much more aggressive glitching throughout the dissolve
     // Starts at 30% progress, increases frequency as we approach the end
@@ -484,27 +581,34 @@ class WEAttendApp {
              chars[Math.floor(Math.random() * chars.length)];
     }
 
-    this.textCtx.fillStyle = `rgba(51, 255, 51, ${opacity})`;
+    // Draw function for reuse with RGB split
+    const drawText = (offsetX, offsetY) => {
+      this.textCtx.fillText(text, w / 2 + offsetX, h / 2 + offsetY);
+    };
 
-    // Occasional RGB channel split glitch (same as WE_HOLD)
-    if (Math.random() < 0.05) {
-      // Draw red channel offset
-      this.textCtx.fillStyle = `rgba(255, 0, 0, ${opacity * 0.3})`;
-      this.textCtx.fillText(text, w / 2 - 2 + glitchX, h / 2 + glitchY);
-      // Draw blue channel offset
-      this.textCtx.fillStyle = `rgba(0, 0, 255, ${opacity * 0.3})`;
-      this.textCtx.fillText(text, w / 2 + 2 + glitchX, h / 2 + glitchY);
-      // Draw main green channel
-      this.textCtx.fillStyle = `rgba(51, 255, 51, ${opacity})`;
+    // Occasional RGB channel split glitch
+    if (this.shouldApplyRGBSplit(config)) {
+      this.renderWithRGBSplit(config, glitchOffset, drawText);
     }
 
-    this.textCtx.fillText(text, w / 2 + glitchX, h / 2 + glitchY);
+    // Draw main green channel
+    this.textCtx.fillStyle = `rgba(51, 255, 51, ${opacity})`;
+    drawText(glitchOffset.x, glitchOffset.y);
+
     this.textCtx.restore();
   }
 
-  renderConfession(text, opacity, prevText = null) {
+  renderConfession(text, opacity, time, prevText = null, showProgress = false) {
     const w = window.innerWidth;
     const h = window.innerHeight;
+    const config = this.getEffectConfig();
+
+    // Apply flicker effect
+    const flickerMult = this.applyFlicker(config, time / 1000);
+    const effectiveOpacity = Math.min(1, opacity) * flickerMult;
+
+    // Calculate glitch offset using config
+    const glitchOffset = this.calcGlitchOffset(config, w, h);
 
     this.textCtx.save();
     this.textCtx.textAlign = 'center';
@@ -513,32 +617,52 @@ class WEAttendApp {
     const fontSize = Math.max(18, h * 0.028);  // Increased from 0.02 to 0.028 (40% larger)
     this.textCtx.font = `${fontSize}px 'Courier New', monospace`;
 
-    this.textCtx.shadowColor = '#33ff33';
-    this.textCtx.shadowBlur = fontSize * 0.25;
+    this.textCtx.shadowColor = config.shadowColor;
+    this.textCtx.shadowBlur = fontSize * config.shadowBlur;
 
-    // Add subtle glitch jitter to confession text
-    const glitchIntensity = 0.003;
-    const glitchX = (Math.random() - 0.5) * glitchIntensity * w;
-    const glitchY = (Math.random() - 0.5) * glitchIntensity * h;
+    // Draw function for reuse with RGB split
+    const drawConfession = (offsetX, offsetY) => {
+      this.renderConfessionText(text, w, h, fontSize, offsetX, offsetY);
+    };
 
-    // Occasional RGB channel split (5% chance per frame)
-    if (Math.random() < 0.05) {
+    // Occasional RGB channel split
+    if (this.shouldApplyRGBSplit(config)) {
       // Draw red channel offset
-      this.textCtx.fillStyle = `rgba(255, 0, 0, ${Math.min(1, opacity) * 0.3})`;
-      this.renderConfessionText(text, w, h, fontSize, glitchX - 2, glitchY);
+      this.textCtx.fillStyle = `rgba(255, 0, 0, ${effectiveOpacity * 0.3})`;
+      drawConfession(glitchOffset.x - config.rgbSplitOffset, glitchOffset.y);
 
       // Draw blue channel offset
-      this.textCtx.fillStyle = `rgba(0, 0, 255, ${Math.min(1, opacity) * 0.3})`;
-      this.renderConfessionText(text, w, h, fontSize, glitchX + 2, glitchY);
+      this.textCtx.fillStyle = `rgba(0, 0, 255, ${effectiveOpacity * 0.3})`;
+      drawConfession(glitchOffset.x + config.rgbSplitOffset, glitchOffset.y);
     }
 
     // Draw main green channel
-    this.textCtx.fillStyle = `rgba(51, 255, 51, ${Math.min(1, opacity)})`;
-    this.renderConfessionText(text, w, h, fontSize, glitchX, glitchY);
+    this.textCtx.fillStyle = `rgba(51, 255, 51, ${effectiveOpacity})`;
+    drawConfession(glitchOffset.x, glitchOffset.y);
 
     // Overlay highlighting for changed characters (yellow glow on changes)
     if (prevText) {
-      this.renderHighlightChanges(text, prevText, w, h, fontSize, opacity, glitchX, glitchY);
+      this.renderHighlightChanges(text, prevText, w, h, fontSize, effectiveOpacity, glitchOffset.x, glitchOffset.y);
+    }
+
+    // Show progress bar during generation
+    if (showProgress) {
+      const progressFontSize = h * 0.02;
+      this.textCtx.font = `${progressFontSize}px 'Courier New', monospace`;
+      this.textCtx.textBaseline = 'top';
+      this.textCtx.fillStyle = `rgba(51, 255, 51, ${0.5 * flickerMult})`;
+
+      // Build ASCII progress bar
+      const totalSteps = DIFFUSION_CONFIG.TOTAL_STEPS;
+      const currentStep = this.frameCounter;
+      const barLength = 20;
+      const filledLength = Math.round((currentStep / totalSteps) * barLength);
+      const emptyLength = barLength - filledLength;
+      const filled = '▓'.repeat(filledLength);
+      const empty = '░'.repeat(emptyLength);
+      const progressText = `LOADING... |${filled}${empty}| ${currentStep}/${totalSteps}`;
+
+      this.textCtx.fillText(progressText, w / 2 + glitchOffset.x, h / 2 + h * 0.22 + glitchOffset.y);
     }
 
     this.textCtx.restore();
