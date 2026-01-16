@@ -121,9 +121,17 @@ const TIMING = {
   WE_FADEIN: 1500,
   WE_HOLD: 2500,
   WE_DISSOLVE: 2500,  // 2.5 seconds for extended glitching
-  CONF_GENERATING: 500,  // Brief pause before starting generation (lets WE dissolve complete)
-  CONF_HOLD: 8000,  // 8 seconds for reading
-  CONF_FADE: 4000  // 4 seconds slow fade
+  CONF_HOLD: 8000,    // 8 seconds for reading
+  CONF_FADE: 4000     // 4 seconds slow fade
+};
+
+// Text grid constants
+const TEXT_GRID = {
+  CHARS_PER_LINE: 32,
+  LINE_COUNT: 8,
+  TOTAL_CHARS: 256,
+  CHAR_WIDTH_RATIO: 0.6,  // Monospace fonts are ~60% as wide as tall
+  CENTER_OFFSET: 15.5,    // (CHARS_PER_LINE / 2) - 0.5 for centering
 };
 
 // Effect configuration with per-state overrides
@@ -135,16 +143,9 @@ const EFFECT_CONFIG = {
     shadowBlur: 0.25,          // Shadow blur as fraction of font size
     shadowColor: '#33ff33',    // Phosphor green
     textColorRGB: '51, 255, 51',  // RGB values for text (opacity applied separately)
-    headerFontSize: 3,        // ASCII art header font size in pixels (adjust to scale the header)
-    flickerEnabled: true,     // Screen brightness flicker
+    flickerEnabled: true,      // Screen brightness flicker
     flickerIntensity: 0.5,     // How strong the flicker is (0-1)
     flickerSpeed: 8.0,         // Base flicker frequency
-  },
-  VOID: {
-    // No rendering in void state
-  },
-  WE_FADEIN: {
-
   },
   WE_HOLD: {
     glitchIntensity: 0.005,    // More jitter when holding
@@ -164,73 +165,29 @@ const EFFECT_CONFIG = {
   },
 };
 
-// ============================================================================
-// VIDEO CAPTURE (Easter Egg) - Captures frames, encodes at fixed FPS
-// ============================================================================
-
-const videoCapture = {
-  isArmed: false,
-  isCapturing: false,
-  frameCount: 0,
-  targetFrames: 64,
-  lastCapturedIndex: -1,
-  frames: [],  // Store captured canvas snapshots
-  fps: 10,     // Output video framerate
-  outputWidth: 2048,   // Output resolution
-  outputHeight: 2048,
-  app: null
-};
-
-// Keyboard trigger for video capture
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'g' || e.key === 'G') {
-    if (!videoCapture.isArmed && !videoCapture.isCapturing) {
-      // Only allow arming when NOT generating
-      if (videoCapture.app && videoCapture.app.state === States.CONF_GENERATING) {
-        console.log("Cannot arm during generation. Wait for current generation to complete.");
-        return;
-      }
-      videoCapture.isArmed = true;
-      console.log("Video Capture Armed. Next generation will be recorded.");
-      console.log(`Output: ${videoCapture.outputWidth}x${videoCapture.outputHeight} @ ${videoCapture.fps} fps WebM`);
-    }
-  }
-});
-
-class WEAttendApp {
+class WEApp {
   constructor() {
     this.textCanvas = document.getElementById('textCanvas');
     this.glCanvas = document.getElementById('glCanvas');
     this.textCtx = this.textCanvas.getContext('2d');
 
     // WebGL 2.0 only (required for CRT effects)
-    // preserveDrawingBuffer required for GIF capture
-    this.gl = this.glCanvas.getContext('webgl2', { alpha: false, antialias: false, preserveDrawingBuffer: true });
-
-    // WebGL 2.0 is required for CRT effects
+    this.gl = this.glCanvas.getContext('webgl2', { alpha: false, antialias: false });
 
     this.state = States.VOID;
     this.stateTime = 0;
     this.lastTime = 0;
 
     this.inferenceEngine = null;
-    this.currentConfession = null;
     this.confessionGenerator = null;
-
-    // Double buffering for smooth looping
-    this.diffusionFrames = [];  // Currently playing frames
-    this.nextFrames = [];  // Next generation buffer
-    this.isBuffering = false;
+    this.activeText = ""; 
+    this.previousText = ""; // For the highlight effect
 
     this.modelLoaded = false;
-    this.firstInteraction = false;
     this.webglReady = false;
   }
 
   async init() {
-    // Store app reference for video capture
-    videoCapture.app = this;
-
     this.resize();
     window.addEventListener('resize', () => this.resize());
 
@@ -240,7 +197,6 @@ class WEAttendApp {
     // Hide overlay immediately - auto-start
     document.getElementById('overlay').classList.add('hidden');
     document.body.classList.add('ready');
-    this.firstInteraction = true;  // Enable rendering
 
     // Start animation loop immediately
     requestAnimationFrame((t) => this.loop(t));
@@ -264,7 +220,9 @@ class WEAttendApp {
   resize() {
     const w = window.innerWidth;
     const h = window.innerHeight;
-    const dpr = window.devicePixelRatio || 1;
+    // Cap DPR at 2.0 to prevent memory explosion on 3x/4x Retina displays
+    // This keeps it sharp while avoiding the 9x-16x pixel count on high-end phones
+    const dpr = Math.min(window.devicePixelRatio || 1, 2.0);
 
     this.textCanvas.width = w * dpr;
     this.textCanvas.height = h * dpr;
@@ -292,8 +250,7 @@ class WEAttendApp {
   // -------------------------------------------------------------------------
 
   getEffectConfig(state = this.state) {
-    const stateKey = state.replace('States.', '');
-    return { ...EFFECT_CONFIG.default, ...EFFECT_CONFIG[stateKey] };
+    return { ...EFFECT_CONFIG.default, ...EFFECT_CONFIG[state] };
   }
 
   calcGlitchOffset(config, w, h) {
@@ -350,17 +307,11 @@ class WEAttendApp {
     drawFn(glitchOffset.x + offset, glitchOffset.y);
   }
 
-  setupTextStyle(config, fontSize, opacity = 1.0) {
-    this.textCtx.shadowColor = config.shadowColor;
-    this.textCtx.shadowBlur = fontSize * config.shadowBlur;
-    this.textCtx.fillStyle = this.getTextColor(config, opacity);
-  }
-
   loop(time) {
     const deltaTime = time - this.lastTime;
     this.lastTime = time;
 
-    if (!this.modelLoaded || !this.firstInteraction) {
+    if (!this.modelLoaded) {
       requestAnimationFrame((t) => this.loop(t));
       return;
     }
@@ -400,18 +351,15 @@ class WEAttendApp {
         break;
 
       case States.CONF_GENERATING:
-        if (!this.generationStarted && this.stateTime > 300) {
-          this.generationStarted = true;
+        if (!this.isGenerating) {
           this.startGeneration();
         }
-        // Show loading message during buffering
         break;
 
       case States.CONF_HOLD:
         if (this.stateTime > TIMING.CONF_HOLD) {
           this.transitionTo(States.CONF_FADE);
         }
-        // Don't start new generation - let current one finish if still running
         break;
 
       case States.CONF_FADE:
@@ -427,57 +375,47 @@ class WEAttendApp {
     this.state = newState;
     this.stateTime = 0;
 
-    if (newState === States.VOID) {
-      this.currentConfession = null;
-      this.confessionGenerator = null;
-    }
-
-    if (newState === States.CONF_GENERATING) {
-      this.generationStarted = false;
-      this.nextGenerationStarted = false;
-      this.currentConfession = null;
-      this.diffusionFrames = [];
+    if (newState === States.WE_FADEIN) {
+      this.activeText = "";
+      this.previousText = "";
+      this.frameCounter = 0;
     }
   }
 
   async startGeneration() {
-    if (this.isBuffering) return;
+    // Session stays persistent - no reinitSession() needed
+    // Re-initializing ONNX sessions is the most memory-intensive operation
+    // and causes mobile browsers to crash from OS memory pressure
+    this.isGenerating = true;
+    this.frameCounter = 0;
 
-    try {
-      this.diffusionFrames = [];
-      this.frameCounter = 0;
-      this.isBuffering = true;
-      this.isGenerating = true;
-      this.confessionGenerator = this.inferenceEngine.generateStream(256, DIFFUSION_CONFIG.TOTAL_STEPS);
-      this.playbackStartTime = performance.now();
-      this.generateNextFrame();
-    } catch (error) {
-      this.isBuffering = false;
-    }
+    this.confessionGenerator = this.inferenceEngine.generateStream(
+      TEXT_GRID.TOTAL_CHARS,
+      DIFFUSION_CONFIG.TOTAL_STEPS
+    );
+    this.generateNextFrame();
   }
 
   async generateNextFrame() {
-    if (!this.confessionGenerator || !this.isBuffering) return;
+    if (!this.confessionGenerator) return;
 
     try {
       const result = await this.confessionGenerator.next();
 
-      if (!result.done && this.isBuffering) {
-        this.diffusionFrames.push(result.value.text);
+      if (!result.done) {
+        this.previousText = this.activeText;
+        this.activeText = result.value.text;
         this.frameCounter++;
-        setTimeout(() => this.generateNextFrame(), 0);
+        requestAnimationFrame(() => this.generateNextFrame());
       } else {
-        this.isBuffering = false;
+        // Generation complete - activeText remains as final output
         this.isGenerating = false;
-        this.confessionGenerator = null;
-
-        if (this.state === States.CONF_GENERATING) {
-          this.transitionTo(States.CONF_HOLD);
-        }
+        this.transitionTo(States.CONF_HOLD);
       }
-    } catch (error) {
-      this.isBuffering = false;
+    } catch (e) {
+      // Generation failed - transition to hold with whatever text we have
       this.isGenerating = false;
+      this.transitionTo(States.CONF_HOLD);
     }
   }
 
@@ -485,180 +423,51 @@ class WEAttendApp {
     const w = this.logicalWidth || window.innerWidth;
     const h = this.logicalHeight || window.innerHeight;
 
-    // Clear canvas completely (important for black background)
-    this.textCtx.clearRect(0, 0, w, h);
+    // Clear canvas completely
     this.textCtx.fillStyle = '#000';
     this.textCtx.fillRect(0, 0, w, h);
 
     // Render text based on state
     switch (this.state) {
-      case States.VOID:
-        break;
-
-      case States.CONF_GENERATING:
-        // Display generated frames in real-time as they're created
-        if (this.diffusionFrames && this.diffusionFrames.length > 0) {
-          const currentText = this.diffusionFrames[this.diffusionFrames.length - 1];
-          const prevText = this.diffusionFrames.length > 1
-            ? this.diffusionFrames[this.diffusionFrames.length - 2]
-            : null;
-
-          // Render with slight opacity pulse to show it's updating
-          const updatePulse = (Math.sin(time * 0.01) + 1) * 0.5;
-          const opacity = 0.85 + updatePulse * 0.15; // 0.85-1.0 pulse
-          this.renderConfession(currentText, opacity, time, prevText, true);
-        }
-        break;
-
+      // "WE" Sequence (The Intro)
       case States.WE_FADEIN:
         this.renderWE(this.stateTime / TIMING.WE_FADEIN, time);
         break;
-
       case States.WE_HOLD:
         this.renderWE(1.0, time);
         break;
-
       case States.WE_DISSOLVE:
         this.renderWEDissolve(this.stateTime / TIMING.WE_DISSOLVE, time);
         break;
 
+      // Confession Sequence (Unified logic)
+      case States.CONF_GENERATING:
       case States.CONF_HOLD:
-        // Show the final generated confession with highlighting
-        if (this.diffusionFrames && this.diffusionFrames.length > 0) {
-          const currentText = this.diffusionFrames[this.diffusionFrames.length - 1];
-          const prevText = this.diffusionFrames.length > 1
-            ? this.diffusionFrames[this.diffusionFrames.length - 2]
-            : null;
-          this.renderConfession(currentText, 1.0, time, prevText);
-          // Save for later use in CONF_FADE
-          this.currentConfession = { text: currentText };
-        }
-        // Don't render old confession as fallback - just leave blank if no new frames
-        break;
-
       case States.CONF_FADE:
-        if (this.currentConfession) {
-          const opacity = 1.0 - (this.stateTime / TIMING.CONF_FADE);
-          if (opacity > 0) {
-            this.renderConfession(this.currentConfession.text, opacity, time);
+        if (this.activeText) {
+          // Calculate opacity based on whether we are fading out or not
+          let opacity = 1.0;
+          if (this.state === States.CONF_FADE) {
+            opacity = Math.max(0, 1.0 - (this.stateTime / TIMING.CONF_FADE));
+          } else if (this.state === States.CONF_GENERATING) {
+            // Subtle pulse during generation to show activity
+            opacity = 0.9 + Math.sin(time * 0.01) * 0.1;
           }
+
+          // renderConfession handles the text, the highlight, and the progress bar
+          this.renderConfession(
+            this.activeText, 
+            opacity, 
+            time, 
+            this.previousText, 
+            this.state === States.CONF_GENERATING // showProgress is true only when generating
+          );
         }
         break;
     }
 
     // Copy to WebGL (simple passthrough for now)
     this.renderWebGL();
-
-    // Video Capture hook
-    if (videoCapture.isCapturing) {
-      // Stop capturing when we leave CONF_GENERATING state
-      if (this.state !== States.CONF_GENERATING) {
-        videoCapture.isCapturing = false;
-        console.log(`Captured ${videoCapture.frameCount} frames. Encoding video at ${videoCapture.fps} fps...`);
-        this.encodeVideo();
-        videoCapture.frameCount = 0;
-        videoCapture.lastCapturedIndex = -1;
-      } else if (this.diffusionFrames && this.diffusionFrames.length > 0) {
-        // Capture frame when new diffusion frame appears
-        const currentFrameIndex = this.diffusionFrames.length - 1;
-        if (currentFrameIndex > videoCapture.lastCapturedIndex) {
-          videoCapture.lastCapturedIndex = currentFrameIndex;
-          // Capture canvas as image
-          const captureCanvas = document.createElement('canvas');
-          captureCanvas.width = this.glCanvas.width;
-          captureCanvas.height = this.glCanvas.height;
-          const ctx = captureCanvas.getContext('2d');
-          ctx.drawImage(this.glCanvas, 0, 0);
-          videoCapture.frames.push(captureCanvas);
-          videoCapture.frameCount++;
-          console.log(`Captured frame ${videoCapture.frameCount}/${videoCapture.targetFrames}`);
-        }
-      }
-    } else if (videoCapture.isArmed && this.state === States.CONF_GENERATING && this.diffusionFrames && this.diffusionFrames.length > 0) {
-      // Start capturing at beginning of generation
-      videoCapture.isCapturing = true;
-      videoCapture.isArmed = false;
-      videoCapture.frames = [];
-      videoCapture.frameCount = 0;
-      videoCapture.lastCapturedIndex = -1;
-      console.log("Video Capture Started.");
-    }
-  }
-
-  encodeVideo() {
-    if (videoCapture.frames.length === 0) {
-      console.log("No frames to encode.");
-      return;
-    }
-
-    // Create offscreen canvas at output resolution
-    const playbackCanvas = document.createElement('canvas');
-    playbackCanvas.width = videoCapture.outputWidth;
-    playbackCanvas.height = videoCapture.outputHeight;
-    const ctx = playbackCanvas.getContext('2d');
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-
-    // Setup MediaRecorder
-    const stream = playbackCanvas.captureStream(videoCapture.fps);
-    const mediaRecorder = new MediaRecorder(stream, {
-      mimeType: 'video/webm;codecs=vp9',
-      videoBitsPerSecond: 5000000
-    });
-    const chunks = [];
-
-    mediaRecorder.ondataavailable = (e) => {
-      if (e.data.size > 0) chunks.push(e.data);
-    };
-
-    mediaRecorder.onstop = () => {
-      const blob = new Blob(chunks, { type: 'video/webm' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'generation-loop.webm';
-      a.click();
-      URL.revokeObjectURL(url);
-      console.log("Video saved as generation-loop.webm");
-      videoCapture.frames = [];
-    };
-
-    // Play back frames at fixed FPS and record
-    mediaRecorder.start();
-    const frameDelay = 1000 / videoCapture.fps;
-    let frameIndex = 0;
-
-    const playNextFrame = () => {
-      if (frameIndex < videoCapture.frames.length) {
-        const frame = videoCapture.frames[frameIndex];
-        // Scale frame to output resolution (center-crop to fill)
-        const srcAspect = frame.width / frame.height;
-        const dstAspect = videoCapture.outputWidth / videoCapture.outputHeight;
-        let sx, sy, sw, sh;
-        if (srcAspect > dstAspect) {
-          // Source is wider - crop sides
-          sh = frame.height;
-          sw = frame.height * dstAspect;
-          sx = (frame.width - sw) / 2;
-          sy = 0;
-        } else {
-          // Source is taller - crop top/bottom
-          sw = frame.width;
-          sh = frame.width / dstAspect;
-          sx = 0;
-          sy = (frame.height - sh) / 2;
-        }
-        ctx.drawImage(frame, sx, sy, sw, sh, 0, 0, videoCapture.outputWidth, videoCapture.outputHeight);
-        frameIndex++;
-        console.log(`Encoding frame ${frameIndex}/${videoCapture.frames.length}`);
-        setTimeout(playNextFrame, frameDelay);
-      } else {
-        // Done - stop recording
-        mediaRecorder.stop();
-      }
-    };
-
-    playNextFrame();
   }
 
   renderWE(opacity, time) {
@@ -757,6 +566,15 @@ class WEAttendApp {
   }
 
   renderConfession(text, opacity, time, prevText = null, showProgress = false) {
+    // SAFETY 1: If the AI is lagging and 'text' is empty/null, 
+    // bail out immediately to keep the screen black instead of flashing white.
+    if (!text || text.length === 0) return;
+    
+    // SAFETY 2: Use a local copy of the text 
+    // This prevents the AI from changing the string mid-draw (which causes flickering)
+    const renderTarget = String(text);
+    const stablePrev = prevText ? String(prevText) : null;
+
     const w = this.logicalWidth || window.innerWidth;
     const h = this.logicalHeight || window.innerHeight;
     const config = this.getEffectConfig();
@@ -796,9 +614,9 @@ class WEAttendApp {
 
     // Draw function for reuse with RGB split
     const drawConfession = (offsetX, offsetY) => {
-      this.renderConfessionText(text, w, h, fontSize, offsetX, offsetY);
+      this.renderConfessionText(renderTarget, w, h, fontSize, offsetX, offsetY);
       // Draw header above the confession text
-      this.renderHeader(headerLines, w, h, config.headerFontSize, offsetX, offsetY);
+      this.renderHeader(headerLines, w, h, offsetX, offsetY);
     };
 
     // Occasional RGB channel split
@@ -817,8 +635,8 @@ class WEAttendApp {
     drawConfession(glitchOffset.x, glitchOffset.y);
 
     // Overlay highlighting for changed characters (yellow glow on changes)
-    if (prevText) {
-      this.renderHighlightChanges(text, prevText, w, h, fontSize, effectiveOpacity, glitchOffset.x, glitchOffset.y);
+    if (stablePrev) {
+      this.renderHighlightChanges(renderTarget, stablePrev, w, h, fontSize, effectiveOpacity, glitchOffset.x, glitchOffset.y);
     }
 
     // Show progress bar during generation
@@ -827,6 +645,12 @@ class WEAttendApp {
       this.textCtx.font = `${progressFontSize}px 'Courier New', monospace`;
       this.textCtx.textBaseline = 'top';
       this.textCtx.fillStyle = this.getTextColor(config, 0.5 * flickerMult);
+
+      // These must match your renderConfessionText math exactly:
+      const confessionFontSize = Math.max(18, h * 0.028);
+      const confessionLineHeight = confessionFontSize * 1.5;
+      const totalTextHeight = TEXT_GRID.LINE_COUNT * confessionLineHeight;
+      const textBottomY = (h + totalTextHeight) / 2;
 
       // Build ASCII progress bar
       const totalSteps = DIFFUSION_CONFIG.TOTAL_STEPS;
@@ -838,25 +662,24 @@ class WEAttendApp {
       const empty = '░'.repeat(emptyLength);
       const progressText = `LOADING... |${filled}${empty}| ${currentStep}/${totalSteps}`;
 
-      this.textCtx.fillText(progressText, w / 2 + glitchOffset.x, h / 2 + h * 0.22 + glitchOffset.y);
+      // Draw at anchored position (20px gap below the text)
+      const barY = textBottomY + 20; 
+      this.textCtx.fillText(progressText, w / 2 + glitchOffset.x, barY + glitchOffset.y);
     }
 
     this.textCtx.restore();
   }
 
   renderConfessionText(text, w, h, fontSize, offsetX, offsetY) {
-    // Fixed grid: 8 lines × 32 characters (256 total)
-    // Pad or truncate text to exactly 256 characters
-    const paddedText = text.padEnd(256, ' ').substring(0, 256);
+    const paddedText = text.padEnd(TEXT_GRID.TOTAL_CHARS, ' ').substring(0, TEXT_GRID.TOTAL_CHARS);
     const lines = [];
 
-    for (let i = 0; i < 8; i++) {
-      lines.push(paddedText.substring(i * 32, (i + 1) * 32));
+    for (let i = 0; i < TEXT_GRID.LINE_COUNT; i++) {
+      lines.push(paddedText.substring(i * TEXT_GRID.CHARS_PER_LINE, (i + 1) * TEXT_GRID.CHARS_PER_LINE));
     }
 
-    // Render centered grid
     const lineHeight = fontSize * 1.5;
-    const totalHeight = 8 * lineHeight;
+    const totalHeight = TEXT_GRID.LINE_COUNT * lineHeight;
     const startY = (h - totalHeight) / 2;
 
     lines.forEach((line, i) => {
@@ -865,39 +688,32 @@ class WEAttendApp {
     });
   }
 
-  renderHeader(headerLines, w, h, headerFontSize, offsetX, offsetY) {
+  renderHeader(headerLines, w, h, offsetX, offsetY) {
+    const headerFontSize = 4;
+    const headerLineHeight = 5;
+
     // Calculate confession layout (must match renderConfessionText)
     const confessionFontSize = Math.max(18, h * 0.028);
     const confessionLineHeight = confessionFontSize * 1.5;
-    const confessionHeight = 8 * confessionLineHeight;
+    const confessionHeight = TEXT_GRID.LINE_COUNT * confessionLineHeight;
     const confessionStartY = (h - confessionHeight) / 2;
 
-    // Header layout
-    const headerLineHeight = headerFontSize * 1.2;
-    const headerTotalHeight = headerLines.length * headerLineHeight;
-
-    // Position header above confession with gap
-    const gap = confessionFontSize * 0.5;
-    const headerStartY = confessionStartY - headerTotalHeight - gap;
+    const headerStartY = confessionStartY - (headerLines.length * headerLineHeight) - 30;
 
     this.textCtx.save();
     this.textCtx.font = `${headerFontSize}px 'Courier New', monospace`;
-    this.textCtx.textAlign = 'left';  // Left-align for ASCII art
-    // Scale shadow to header size (inherits color and fillStyle from parent)
+    this.textCtx.textAlign = 'left';
     this.textCtx.shadowBlur = headerFontSize * 0.25;
 
-    // Find widest line to center the block
     let maxWidth = 0;
     headerLines.forEach(line => {
       const lineWidth = this.textCtx.measureText(line).width;
       if (lineWidth > maxWidth) maxWidth = lineWidth;
     });
-
-    // Center the entire block horizontally
     const blockStartX = (w - maxWidth) / 2;
 
     headerLines.forEach((line, i) => {
-      const y = headerStartY + i * headerLineHeight;
+      const y = headerStartY + (i * headerLineHeight);
       this.textCtx.fillText(line, blockStartX + offsetX, y + offsetY);
     });
 
@@ -905,43 +721,36 @@ class WEAttendApp {
   }
 
   renderHighlightChanges(text, prevText, w, h, fontSize, opacity, offsetX, offsetY) {
-    // Overlay yellow highlights on changed characters
-    const paddedText = text.padEnd(256, ' ').substring(0, 256);
-    const paddedPrev = prevText.padEnd(256, ' ').substring(0, 256);
+    if (!prevText || !text) return;
 
-    const lines = [];
-    for (let i = 0; i < 256; i += 32) {
-      lines.push(paddedText.substring(i, i + 32));
-    }
+    const paddedText = String(text).padEnd(TEXT_GRID.TOTAL_CHARS, ' ').substring(0, TEXT_GRID.TOTAL_CHARS);
+    const paddedPrev = String(prevText).padEnd(TEXT_GRID.TOTAL_CHARS, ' ').substring(0, TEXT_GRID.TOTAL_CHARS);
 
-    // Calculate grid position (matches renderConfessionText layout)
-    const charWidth = this.textCtx.measureText('M').width;
     const lineHeight = fontSize * 1.5;
-    const startY = h / 2 - (lineHeight * 3.5); // 8 lines centered, 3.5 from center
+    const totalHeight = TEXT_GRID.LINE_COUNT * lineHeight;
+    const startY = (h - totalHeight) / 2;
+    const charWidth = fontSize * TEXT_GRID.CHAR_WIDTH_RATIO;
 
-    // Highlight changed characters with yellow glow
     this.textCtx.save();
-    this.textCtx.fillStyle = `rgba(255, 255, 100, ${opacity * 0.7})`;
-    this.textCtx.shadowColor = '#ffff00';
-    this.textCtx.shadowBlur = fontSize * 0.8;
+    this.textCtx.fillStyle = `rgba(255, 255, 180, ${opacity * 0.8})`;
+    this.textCtx.shadowColor = 'rgba(255, 255, 0, 0.9)';
+    this.textCtx.shadowBlur = fontSize * 0.5;
     this.textCtx.textAlign = 'center';
     this.textCtx.textBaseline = 'middle';
-    this.textCtx.font = `${fontSize}px 'Courier New', monospace`;
 
-    for (let i = 0; i < 256; i++) {
+    for (let i = 0; i < TEXT_GRID.TOTAL_CHARS; i++) {
       const char = paddedText[i];
       const prevChar = paddedPrev[i];
 
-      // Only highlight if character changed
       if (char !== prevChar && char !== ' ') {
-        const row = Math.floor(i / 32);
-        const col = i % 32;
-        const x = w / 2 + (col - 15.5) * charWidth + offsetX;
-        const y = startY + row * lineHeight + offsetY;
+        const row = Math.floor(i / TEXT_GRID.CHARS_PER_LINE);
+        const col = i % TEXT_GRID.CHARS_PER_LINE;
+        const x = w / 2 + (col - TEXT_GRID.CENTER_OFFSET) * charWidth + offsetX;
+        const y = startY + (row * lineHeight) + (lineHeight / 2) + offsetY;
+
         this.textCtx.fillText(char, x, y);
       }
     }
-
     this.textCtx.restore();
   }
 
@@ -1427,7 +1236,7 @@ class WEAttendApp {
 // ============================================================================
 
 window.addEventListener('DOMContentLoaded', async () => {
-  const app = new WEAttendApp();
+  const app = new WEApp();
   await app.init();
 });
 
