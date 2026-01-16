@@ -164,6 +164,39 @@ const EFFECT_CONFIG = {
   },
 };
 
+// ============================================================================
+// VIDEO CAPTURE (Easter Egg) - Captures frames, encodes at fixed FPS
+// ============================================================================
+
+const videoCapture = {
+  isArmed: false,
+  isCapturing: false,
+  frameCount: 0,
+  targetFrames: 64,
+  lastCapturedIndex: -1,
+  frames: [],  // Store captured canvas snapshots
+  fps: 10,     // Output video framerate
+  outputWidth: 1280,   // Output resolution
+  outputHeight: 1280,
+  app: null
+};
+
+// Keyboard trigger for video capture
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'g' || e.key === 'G') {
+    if (!videoCapture.isArmed && !videoCapture.isCapturing) {
+      // Only allow arming when NOT generating
+      if (videoCapture.app && videoCapture.app.state === States.CONF_GENERATING) {
+        console.log("Cannot arm during generation. Wait for current generation to complete.");
+        return;
+      }
+      videoCapture.isArmed = true;
+      console.log("Video Capture Armed. Next generation will be recorded.");
+      console.log(`Output: ${videoCapture.outputWidth}x${videoCapture.outputHeight} @ ${videoCapture.fps} fps WebM`);
+    }
+  }
+});
+
 class WEAttendApp {
   constructor() {
     this.textCanvas = document.getElementById('textCanvas');
@@ -171,7 +204,8 @@ class WEAttendApp {
     this.textCtx = this.textCanvas.getContext('2d');
 
     // WebGL 2.0 only (required for CRT effects)
-    this.gl = this.glCanvas.getContext('webgl2', { alpha: false, antialias: false });
+    // preserveDrawingBuffer required for GIF capture
+    this.gl = this.glCanvas.getContext('webgl2', { alpha: false, antialias: false, preserveDrawingBuffer: true });
 
     // WebGL 2.0 is required for CRT effects
 
@@ -194,6 +228,9 @@ class WEAttendApp {
   }
 
   async init() {
+    // Store app reference for video capture
+    videoCapture.app = this;
+
     this.resize();
     window.addEventListener('resize', () => this.resize());
 
@@ -233,7 +270,8 @@ class WEAttendApp {
     this.textCanvas.height = h * dpr;
     this.textCanvas.style.width = w + 'px';
     this.textCanvas.style.height = h + 'px';
-    this.textCtx.scale(dpr, dpr);
+    // Reset transform and apply dpr scaling (setting canvas.width resets transform)
+    this.textCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     this.glCanvas.width = w * dpr;
     this.glCanvas.height = h * dpr;
@@ -243,6 +281,10 @@ class WEAttendApp {
     if (this.gl) {
       this.gl.viewport(0, 0, this.glCanvas.width, this.glCanvas.height);
     }
+
+    // Store logical dimensions for render methods
+    this.logicalWidth = w;
+    this.logicalHeight = h;
   }
 
   // -------------------------------------------------------------------------
@@ -440,8 +482,8 @@ class WEAttendApp {
   }
 
   render(time) {
-    const w = window.innerWidth;
-    const h = window.innerHeight;
+    const w = this.logicalWidth || window.innerWidth;
+    const h = this.logicalHeight || window.innerHeight;
 
     // Clear canvas completely (important for black background)
     this.textCtx.clearRect(0, 0, w, h);
@@ -506,11 +548,122 @@ class WEAttendApp {
 
     // Copy to WebGL (simple passthrough for now)
     this.renderWebGL();
+
+    // Video Capture hook
+    if (videoCapture.isCapturing) {
+      // Stop capturing when we leave CONF_GENERATING state
+      if (this.state !== States.CONF_GENERATING) {
+        videoCapture.isCapturing = false;
+        console.log(`Captured ${videoCapture.frameCount} frames. Encoding video at ${videoCapture.fps} fps...`);
+        this.encodeVideo();
+        videoCapture.frameCount = 0;
+        videoCapture.lastCapturedIndex = -1;
+      } else if (this.diffusionFrames && this.diffusionFrames.length > 0) {
+        // Capture frame when new diffusion frame appears
+        const currentFrameIndex = this.diffusionFrames.length - 1;
+        if (currentFrameIndex > videoCapture.lastCapturedIndex) {
+          videoCapture.lastCapturedIndex = currentFrameIndex;
+          // Capture canvas as image
+          const captureCanvas = document.createElement('canvas');
+          captureCanvas.width = this.glCanvas.width;
+          captureCanvas.height = this.glCanvas.height;
+          const ctx = captureCanvas.getContext('2d');
+          ctx.drawImage(this.glCanvas, 0, 0);
+          videoCapture.frames.push(captureCanvas);
+          videoCapture.frameCount++;
+          console.log(`Captured frame ${videoCapture.frameCount}/${videoCapture.targetFrames}`);
+        }
+      }
+    } else if (videoCapture.isArmed && this.state === States.CONF_GENERATING && this.diffusionFrames && this.diffusionFrames.length > 0) {
+      // Start capturing at beginning of generation
+      videoCapture.isCapturing = true;
+      videoCapture.isArmed = false;
+      videoCapture.frames = [];
+      videoCapture.frameCount = 0;
+      videoCapture.lastCapturedIndex = -1;
+      console.log("Video Capture Started.");
+    }
+  }
+
+  encodeVideo() {
+    if (videoCapture.frames.length === 0) {
+      console.log("No frames to encode.");
+      return;
+    }
+
+    // Create offscreen canvas at output resolution
+    const playbackCanvas = document.createElement('canvas');
+    playbackCanvas.width = videoCapture.outputWidth;
+    playbackCanvas.height = videoCapture.outputHeight;
+    const ctx = playbackCanvas.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+
+    // Setup MediaRecorder
+    const stream = playbackCanvas.captureStream(videoCapture.fps);
+    const mediaRecorder = new MediaRecorder(stream, {
+      mimeType: 'video/webm;codecs=vp9',
+      videoBitsPerSecond: 5000000
+    });
+    const chunks = [];
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) chunks.push(e.data);
+    };
+
+    mediaRecorder.onstop = () => {
+      const blob = new Blob(chunks, { type: 'video/webm' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'generation-loop.webm';
+      a.click();
+      URL.revokeObjectURL(url);
+      console.log("Video saved as generation-loop.webm");
+      videoCapture.frames = [];
+    };
+
+    // Play back frames at fixed FPS and record
+    mediaRecorder.start();
+    const frameDelay = 1000 / videoCapture.fps;
+    let frameIndex = 0;
+
+    const playNextFrame = () => {
+      if (frameIndex < videoCapture.frames.length) {
+        const frame = videoCapture.frames[frameIndex];
+        // Scale frame to output resolution (center-crop to fill)
+        const srcAspect = frame.width / frame.height;
+        const dstAspect = videoCapture.outputWidth / videoCapture.outputHeight;
+        let sx, sy, sw, sh;
+        if (srcAspect > dstAspect) {
+          // Source is wider - crop sides
+          sh = frame.height;
+          sw = frame.height * dstAspect;
+          sx = (frame.width - sw) / 2;
+          sy = 0;
+        } else {
+          // Source is taller - crop top/bottom
+          sw = frame.width;
+          sh = frame.width / dstAspect;
+          sx = 0;
+          sy = (frame.height - sh) / 2;
+        }
+        ctx.drawImage(frame, sx, sy, sw, sh, 0, 0, videoCapture.outputWidth, videoCapture.outputHeight);
+        frameIndex++;
+        console.log(`Encoding frame ${frameIndex}/${videoCapture.frames.length}`);
+        setTimeout(playNextFrame, frameDelay);
+      } else {
+        // Done - stop recording
+        mediaRecorder.stop();
+      }
+    };
+
+    playNextFrame();
   }
 
   renderWE(opacity, time) {
-    const w = window.innerWidth;
-    const h = window.innerHeight;
+    const w = this.logicalWidth || window.innerWidth;
+    const h = this.logicalHeight || window.innerHeight;
     const config = this.getEffectConfig();
 
     // Apply flicker effect
@@ -553,8 +706,8 @@ class WEAttendApp {
   }
 
   renderWEDissolve(progress, time) {
-    const w = window.innerWidth;
-    const h = window.innerHeight;
+    const w = this.logicalWidth || window.innerWidth;
+    const h = this.logicalHeight || window.innerHeight;
     const config = this.getEffectConfig();
 
     // Apply flicker effect
@@ -604,8 +757,8 @@ class WEAttendApp {
   }
 
   renderConfession(text, opacity, time, prevText = null, showProgress = false) {
-    const w = window.innerWidth;
-    const h = window.innerHeight;
+    const w = this.logicalWidth || window.innerWidth;
+    const h = this.logicalHeight || window.innerHeight;
     const config = this.getEffectConfig();
 
     // Apply flicker effect
