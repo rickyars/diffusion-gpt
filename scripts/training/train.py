@@ -267,7 +267,7 @@ def train_model(
         val_split=val_split,
         vocab_path=vocab_path if os.path.exists(vocab_path) else None,
         shuffle=True,
-        num_workers=4,  # Increased for faster data loading (adjust based on CPU cores)
+        num_workers=0,  # Windows multiprocess overhead; set to 0 for better performance
         max_chars=max_chars,
     )
 
@@ -280,7 +280,7 @@ def train_model(
         val_split=val_split,
         vocab_path=vocab_path,
         shuffle=False,
-        num_workers=4,  # Increased for faster data loading
+        num_workers=0,  # Windows multiprocess overhead; set to 0 for better performance
         max_chars=max_chars,
     )
 
@@ -487,12 +487,21 @@ def train_model(
             num_batches = 0
             epoch_chars = 0  # Track total characters processed
 
+            # Profiling timers
+            data_time = forward_time = backward_time = optim_time = 0.0
+            t0 = time.time()
+
             for batch_idx, batch in enumerate(train_loader):
                 if should_stop:
                     break
 
+                # Profile: data loading time
+                data_time += time.time() - t0
+
                 batch = batch.to(device, non_blocking=True)
 
+                # Profile: forward pass
+                t1 = time.time()
                 # Mixed precision training
                 if use_amp:
                     with torch.amp.autocast('cuda'):
@@ -501,25 +510,38 @@ def train_model(
                             sampling_eps=config['model']['sigma_min'],
                             loss_weight_mode=loss_weight_mode
                         )
-
-                    optimizer.zero_grad()
-                    scaler.scale(loss).backward()
-                    scaler.step(optimizer)
-                    scaler.update()
                 else:
                     loss = loss_function(
                         model, batch, noise, vocab_size,
                         sampling_eps=config['model']['sigma_min'],
                         loss_weight_mode=loss_weight_mode
                     )
+                forward_time += time.time() - t1
 
-                    optimizer.zero_grad()
+                # Profile: backward pass
+                t2 = time.time()
+                optimizer.zero_grad()
+                if use_amp:
+                    scaler.scale(loss).backward()
+                else:
                     loss.backward()
+                backward_time += time.time() - t2
+
+                # Profile: optimizer step
+                t3 = time.time()
+                if use_amp:
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
                     optimizer.step()
 
                 # Update learning rate scheduler (after optimizer.step)
                 if scheduler is not None:
                     scheduler.step()
+                optim_time += time.time() - t3
+
+                # Reset timer for next iteration's data loading
+                t0 = time.time()
 
                 epoch_loss += loss.item()
                 num_batches += 1
@@ -543,6 +565,11 @@ def train_model(
             print(f"  Learning rate:     {current_lr:.2e}")
             print(f"  Epoch time: {epoch_time:.1f}s | Throughput: {samples_per_sec:.0f} samples/sec")
             print(f"  Characters processed: {epoch_chars:,}")
+
+            # Print profiling breakdown
+            total_time = data_time + forward_time + backward_time + optim_time
+            if total_time > 0:
+                print(f"  Time breakdown: Data {data_time/total_time*100:.1f}% | Forward {forward_time/total_time*100:.1f}% | Backward {backward_time/total_time*100:.1f}% | Optim {optim_time/total_time*100:.1f}%")
 
             # Validation
             if (epoch + 1) % eval_interval == 0:

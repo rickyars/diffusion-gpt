@@ -51,9 +51,9 @@ training:
 
   # Validation and logging
   val_split: 0.1              # Fraction of data for validation
-  eval_interval: 5            # Evaluate validation loss every N epochs
+  eval_interval: 100          # Evaluate validation loss every N epochs
   save_interval: 5            # Save checkpoint every N epochs
-  log_interval: 100           # Log training loss every N batches
+  log_interval: 1000          # Log training loss every N batches
   skip_completed: true        # Skip datasets with existing final checkpoint
 
   # Loss configuration
@@ -66,7 +66,7 @@ training:
                               # NOTE: Auto-disabled when use_qat=true (QAT requires FP32)
 
   # Quantization-Aware Training (QAT)
-  use_qat: true               # Train with INT8 quantization awareness (4x smaller, 2x faster inference)
+  use_qat: false               # Train with INT8 quantization awareness (4x smaller, 2x faster inference)
   qat_backend: 'fbgemm'       # 'fbgemm' (x86 CPUs) or 'qnnpack' (ARM CPUs)
                               # NOTE: QAT automatically disables AMP (incompatible)
 
