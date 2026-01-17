@@ -60,12 +60,6 @@ training:
   use_compile: true           # torch.compile() for faster training (CUDA only, requires Triton)
   use_fused_adamw: true       # Fused AdamW optimizer (5-8% speedup on CUDA)
   use_amp: true               # Automatic Mixed Precision (faster, uses less memory on CUDA)
-                              # NOTE: Auto-disabled when use_qat=true (QAT requires FP32)
-
-  # Quantization-Aware Training (QAT)
-  use_qat: false               # Train with INT8 quantization awareness (4x smaller, 2x faster inference)
-  qat_backend: 'fbgemm'       # 'fbgemm' (x86 CPUs) or 'qnnpack' (ARM CPUs)
-                              # NOTE: QAT automatically disables AMP (incompatible)
 
 
 # =============================================================================

@@ -157,7 +157,7 @@ Update `olive_config.json` with your model path, then run:
 olive run --config olive_config.json
 ```
 
-This converts PyTorch → ONNX with INT8 quantization (~90% size reduction).
+This converts PyTorch → ONNX format for browser inference.
 
 **2. Build HTML art piece:**
 ```bash
@@ -344,17 +344,10 @@ training:
   log_interval: 100        # Log loss every N batches
   skip_completed: true     # Skip already-trained datasets
 
-  # Loss configuration
-  loss_weight_mode: 'snr'  # 'uniform', 'snr', or 'importance'
-
   # Performance optimizations
   use_compile: true        # torch.compile() for speed
   use_fused_adamw: true    # Fused AdamW optimizer
   use_amp: true            # Automatic Mixed Precision
-
-  # Quantization-Aware Training
-  use_qat: false           # Train with INT8 quantization
-  qat_backend: 'fbgemm'    # 'fbgemm' (x86) or 'qnnpack' (ARM)
 ```
 
 #### Generation Defaults
@@ -534,28 +527,10 @@ Mixed-precision training is automatically enabled on CUDA devices:
 
 No configuration needed—it works automatically and can reduce memory usage by ~30%.
 
-### Quantization-Aware Training (QAT)
-
-Train models with INT8 quantization awareness for 4x smaller and 2x faster inference in the browser:
-
-```yaml
-training:
-  use_qat: true  # Enable QAT
-  qat_backend: 'fbgemm'  # x86 or ARM backend
-```
-
-Results:
-- Model size: 45 MB → 11 MB (4x reduction)
-- Browser inference: 640ms → 320ms per step (2x speedup)
-- Quality: Same as FP32 (no gibberish)
-
-See **[docs/QAT_GUIDE.md](docs/QAT_GUIDE.md)** for complete guide.
-
 ## 📚 Documentation
 
 Detailed guides have been organized in the `docs/` folder:
 
-- **[docs/QAT_GUIDE.md](docs/QAT_GUIDE.md)** - Quantization-Aware Training for smaller, faster models
 - **[docs/WE_CUSTOMIZATION_GUIDE.md](docs/WE_CUSTOMIZATION_GUIDE.md)** - Customizing the WE art piece and converting models to ONNX
 - **[docs/ANIMATION_GUIDE.md](docs/ANIMATION_GUIDE.md)** - Creating animated GIFs of denoising process
 - **[docs/CONDITIONAL_GENERATION.md](docs/CONDITIONAL_GENERATION.md)** - Conditional text generation with prefix/suffix constraints
@@ -577,7 +552,7 @@ Detailed guides have been organized in the `docs/` folder:
 
 ### Training Objective
 
-Score Entropy Loss (DWDSE): Learns probability ratios between clean and noisy distributions.
+**Diffusion-Weighted Denoising Score Matching Entropy (DWDSE)**: The model is trained to estimate probability ratios between clean and noisy text distributions. This enables efficient, non-autoregressive generation where all positions are denoised in parallel.
 
 ## Citation
 
