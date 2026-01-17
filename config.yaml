@@ -56,9 +56,6 @@ training:
   log_interval: 1000          # Log training loss every N batches
   skip_completed: true        # Skip datasets with existing final checkpoint
 
-  # Loss configuration
-  loss_weight_mode: 'snr'     # 'uniform', 'snr' (emphasize sharpness), or 'importance' (faster convergence)
-
   # Performance optimizations
   use_compile: true           # torch.compile() for faster training (CUDA only, requires Triton)
   use_fused_adamw: true       # Fused AdamW optimizer (5-8% speedup on CUDA)
