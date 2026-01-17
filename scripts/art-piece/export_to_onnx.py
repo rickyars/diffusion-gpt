@@ -1,23 +1,24 @@
 """
-Export the discrete diffusion model to ONNX format with INT8 quantization
+Export the discrete diffusion model to ONNX format
 for in-browser inference using ONNX Runtime Web.
 """
 
 import argparse
+import os
+import sys
+
 import torch
 import pickle
 import json
 import base64
-import os
-import sys
 
-# Add project root to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+# Add training directory to path for model imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'training'))
 
 from model import GPT, GPTConfig
 
-def export_model_to_onnx(model_path, dataset_name):
-    """Export PyTorch model to quantized ONNX format."""
+def export_model_to_onnx(model_path, output_path):
+    """Export PyTorch model to ONNX format."""
 
     print(f"Loading model from {model_path}...")
 
@@ -44,9 +45,11 @@ def export_model_to_onnx(model_path, dataset_name):
     # Initialize model
     model = GPT(config)
     model.load_state_dict(checkpoint['model_state_dict'])
+
     model.eval()
 
     print(f"Model parameters: {model.get_num_params() / 1e6:.2f}M")
+    print("Model type: FP32")
 
     # Create dummy inputs for ONNX export
     batch_size = 1
@@ -56,23 +59,21 @@ def export_model_to_onnx(model_path, dataset_name):
     dummy_sigma = torch.randn(batch_size, 1)
 
     # Export to ONNX
-    onnx_path = f'models/{dataset_name}_model.onnx'
+    onnx_path = output_path
     print(f"\nExporting to ONNX format: {onnx_path}...")
 
+    # Export with static shapes - dynamic shapes cause issues with onnxruntime quantization
+    # The browser inference always uses fixed block_size anyway
     torch.onnx.export(
         model,
         (dummy_idx, dummy_sigma),
         onnx_path,
         input_names=['input_ids', 'sigma'],
         output_names=['logits'],
-        dynamic_axes={
-            'input_ids': {0: 'batch_size', 1: 'sequence_length'},
-            'sigma': {0: 'batch_size'},
-            'logits': {0: 'batch_size', 1: 'sequence_length'}
-        },
         opset_version=18,
         do_constant_folding=True,
-        verbose=False
+        verbose=False,
+        dynamo=True  # Use torch.export-based ONNX exporter (PyTorch 2.9+)
     )
 
     # Check if external data was created and merge it
@@ -85,7 +86,7 @@ def export_model_to_onnx(model_path, dataset_name):
             onnx.save(onnx_model, onnx_path)
             # Remove external data file since it's now embedded
             os.remove(data_path)
-            print("✓ External data embedded and merged")
+            print("[OK] External data embedded and merged")
         except Exception as e:
             print(f"Note: External data file exists. Run merge_onnx_data.py to merge: {e}")
 
@@ -93,46 +94,25 @@ def export_model_to_onnx(model_path, dataset_name):
     onnx_size = os.path.getsize(onnx_path) / (1024 * 1024)
     print(f"ONNX model size: {onnx_size:.2f} MB")
 
-    # Quantize the model
-    try:
-        from onnxruntime.quantization import quantize_dynamic, QuantType
-
-        quantized_path = f'models/{dataset_name}_model_quantized.onnx'
-        print(f"\nAttempting to quantize model to INT8...")
-
-        try:
-            quantize_dynamic(
-                onnx_path,
-                quantized_path,
-                weight_type=QuantType.QUInt8
-            )
-
-            quantized_size = os.path.getsize(quantized_path) / (1024 * 1024)
-            print(f"[OK] Quantized model size: {quantized_size:.2f} MB")
-            print(f"     Size reduction: {((onnx_size - quantized_size) / onnx_size * 100):.1f}%")
-
-            final_model_path = quantized_path
-
-        except Exception as e:
-            print(f"\n[WARNING] Quantization failed: {str(e)[:100]}")
-            print(f"          Using non-quantized ONNX model instead ({onnx_size:.2f} MB)")
-            final_model_path = onnx_path
-
-    except ImportError:
-        print("\nWarning: onnxruntime not installed, skipping quantization")
-        print("Install with: pip install onnxruntime")
-        final_model_path = onnx_path
-
-    return final_model_path, config
+    return onnx_path, config
 
 def export_vocab(dataset_name):
-    """Export vocabulary to JSON format."""
+    """Export vocabulary to JSON format (loads from .pkl or .json)."""
 
-    vocab_path = f'vocab/{dataset_name}_vocab.pkl'
-    print(f"\nLoading vocabulary from {vocab_path}...")
+    # Try pkl first, then json
+    pkl_path = f'vocab/{dataset_name}_vocab.pkl'
+    json_path = f'vocab/{dataset_name}_vocab.json'
 
-    with open(vocab_path, 'rb') as f:
-        vocab_meta = pickle.load(f)
+    if os.path.exists(pkl_path):
+        print(f"\nLoading vocabulary from {pkl_path}...")
+        with open(pkl_path, 'rb') as f:
+            vocab_meta = pickle.load(f)
+    elif os.path.exists(json_path):
+        print(f"\nLoading vocabulary from {json_path}...")
+        with open(json_path, 'r') as f:
+            vocab_meta = json.load(f)
+    else:
+        raise FileNotFoundError(f"No vocabulary found at {pkl_path} or {json_path}")
 
     vocab_data = {
         'itos': vocab_meta['itos'],
@@ -140,8 +120,7 @@ def export_vocab(dataset_name):
         'vocab_size': len(vocab_meta['itos'])
     }
 
-    # Save as JSON
-    json_path = f'vocab/{dataset_name}_vocab.json'
+    # Save as JSON (update if loaded from pkl)
     with open(json_path, 'w') as f:
         json.dump(vocab_data, f, separators=(',', ':'))
 
@@ -199,7 +178,7 @@ const MODEL_CONFIG = {{
 // Vocabulary mapping
 const VOCAB = {vocab_json};
 
-// ONNX model as base64 (quantized INT8)
+// ONNX model as base64
 // Size: {model_size_mb:.2f} MB
 // Note: In production, split this into chunks if needed
 const MODEL_BASE64 = '{model_base64[:100]}...'; // Truncated for display
@@ -244,7 +223,7 @@ async function loadModel() {{
     print("\n" + "="*60)
     print("SIZE ESTIMATES FOR HTML FILE")
     print("="*60)
-    print(f"Model (quantized):           {model_size_mb:.2f} MB")
+    print(f"Model (FP32):                {model_size_mb:.2f} MB")
     print(f"Vocabulary:                  {vocab_size_kb:.2f} KB")
     print(f"ONNX Runtime Web (~2.5MB):   2.50 MB")
     print(f"JavaScript code (~50KB):     0.05 MB")
@@ -278,10 +257,16 @@ if __name__ == '__main__':
         help='Path to PyTorch model checkpoint (e.g., models/confessions_epoch_15.pt)'
     )
     parser.add_argument(
-        '--dataset',
+        '--vocab',
         type=str,
         required=True,
-        help='Dataset name for output files (e.g., confessions)'
+        help='Path to vocabulary file (e.g., vocab/confessions_vocab.pkl)'
+    )
+    parser.add_argument(
+        '--output',
+        type=str,
+        default='models/model.onnx',
+        help='Output path for ONNX model (default: models/model.onnx)'
     )
 
     args = parser.parse_args()
@@ -290,19 +275,17 @@ if __name__ == '__main__':
     print("EXPORTING DISCRETE DIFFUSION MODEL FOR WEB")
     print("="*60)
     print(f"Model: {args.model}")
-    print(f"Dataset: {args.dataset}")
+    print(f"Vocab: {args.vocab}")
+    print(f"Output: {args.output}")
     print("="*60)
 
-    # Export model to ONNX
-    model_path, config = export_model_to_onnx(args.model, args.dataset)
-
-    # Export vocabulary
-    vocab_path, vocab_data = export_vocab(args.dataset)
+    # Export model to ONNX (output will be {output}_quantized.onnx if quantization succeeds)
+    final_model_path, config = export_model_to_onnx(args.model, args.output)
 
     print("\n" + "="*60)
     print("EXPORT COMPLETE!")
     print("="*60)
-    print(f"ONNX model: {model_path}")
-    print(f"Vocabulary: {vocab_path}")
+    print(f"ONNX model: {final_model_path}")
+    print(f"Vocabulary: {args.vocab}")
     print("\nNext: Run update_model.py to generate we.html")
-    print(f"  python scripts/art-piece/update_model.py --dataset {args.dataset}")
+    print(f"  python scripts/art-piece/update_model.py --model {final_model_path} --vocab {args.vocab}")

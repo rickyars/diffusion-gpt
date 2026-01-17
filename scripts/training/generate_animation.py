@@ -13,9 +13,6 @@ import torch
 import yaml
 from PIL import Image, ImageDraw, ImageFont
 
-# Add project root to path to import model and utils
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
-
 from model import GPT, GPTConfig
 from utils import (
     GeometricNoise,
@@ -331,8 +328,8 @@ def main():
 
     # Initialize noise schedule
     noise = GeometricNoise(
-        sigma_min=config['noise']['sigma_min'],
-        sigma_max=config['noise']['sigma_max'],
+        sigma_min=config['model']['sigma_min'],
+        sigma_max=config['model']['sigma_max'],
     )
 
     # Create output directory

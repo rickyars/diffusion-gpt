@@ -58,15 +58,12 @@ python scripts/art-piece/export_to_onnx.py \
 
 This will create:
 - `models/confessions_model.onnx` - The ONNX model file
-- `models/confessions_model_quantized.onnx` - INT8 quantized version (if quantization succeeds)
 - `vocab/confessions_vocab.json` - Character vocabulary in JSON format
 
 **What it does:**
 - Converts PyTorch model to ONNX format (opset version 18)
-- Performs INT8 quantization to reduce file size (typically 30-50% smaller)
-- Falls back to non-quantized ONNX if quantization fails
 - Exports vocabulary from pickle to JSON format
-- Prints file sizes and size reduction percentages
+- Prints file sizes
 
 **Options:**
 - `--model`: Path to your trained PyTorch checkpoint (required)
@@ -138,11 +135,11 @@ python scripts/art-piece/update_model.py --model models/new_model.onnx --dataset
 
 ### File Size Optimization
 
-The export process optimizes for browser deployment:
+The export process is optimized for browser deployment:
 
 | Component | Size | Notes |
 |-----------|------|-------|
-| ONNX model (quantized) | 15-25 MB | INT8 quantization reduces size 30-50% |
+| ONNX model (FP32) | 30-50 MB | Full precision model |
 | Vocabulary | <1 KB | Character mappings (tiny) |
 | JavaScript code | ~50 KB | All logic and utilities |
 | ONNX Runtime Web | ~2.5 MB | Included in final HTML |
@@ -155,14 +152,9 @@ The export process optimizes for browser deployment:
 - Ensure model checkpoint exists at the specified path
 - Check that the dataset name matches your training
 
-**Quantization fails:**
-- The script falls back to non-quantized ONNX automatically
-- Non-quantized models are still browser-compatible, just larger (~30-50% bigger)
-- Ensure `onnxruntime` is installed: `pip install onnxruntime`
-
-**ONNX file is very large (>100MB):**
-- Quantization may not have worked—check console output
-- Try with a smaller model architecture (reduce `n_layer`, `n_embd` in config.yaml)
+**ONNX file is very large (>50MB):**
+- This is expected for FP32 models
+- To reduce size, try a smaller model architecture (reduce `n_layer`, `n_embd` in config.yaml)
 
 **"Model not found" during build:**
 - Ensure you ran the export_to_onnx.py script first
