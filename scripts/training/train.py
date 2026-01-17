@@ -144,8 +144,8 @@ def loss_function(
     loss = score_entropy(log_score, sigma_bar[:, None], x_t, x0, vocab_size)
 
     # Apply sigma weighting (derivative of noise schedule, required by theory)
-    # Shape: (B, L) -> (B,)
-    loss = (sigma[:, None] * loss).mean(dim=-1)
+    # Shape: (B, L) -> (B,) -> scalar
+    loss = (sigma[:, None] * loss).mean(dim=-1).mean()
 
     return loss
 
@@ -405,6 +405,10 @@ def train_model(
 
     # Flag for graceful shutdown
     should_stop = False
+
+    # Initialize loss tracking variables
+    avg_train_loss = 0.0
+    epoch = start_epoch
 
     def signal_handler(sig, frame):
         nonlocal should_stop
