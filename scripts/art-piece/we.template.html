@@ -182,6 +182,7 @@ class WEApp {
     this.confessionGenerator = null;
     this.activeText = ""; 
     this.previousText = ""; // For the highlight effect
+    this.isGenerating = false;
 
     this.modelLoaded = false;
     this.webglReady = false;
@@ -204,15 +205,23 @@ class WEApp {
 
   async loadModel() {
     try {
-      const modelBytes = base64ToUint8Array(MODEL_BASE64);
+      let modelData = MODEL_BASE64;
+      window.MODEL_BASE64 = null; 
+
+      const modelBytes = base64ToUint8Array(modelData);
+      modelData = null;
+      
       this.inferenceEngine = new DiffusionInferenceEngine(
         modelBytes,
         VOCAB,
         MODEL_CONFIG
       );
+
       await this.inferenceEngine.init();
+
       this.modelLoaded = true;
     } catch (error) {
+      console.error(error);
       document.getElementById('overlay').textContent = 'ERROR: ' + error.message;
     }
   }
@@ -352,11 +361,14 @@ class WEApp {
 
       case States.CONF_GENERATING:
         if (!this.isGenerating) {
+          this.isGenerating = true;
           this.startGeneration();
         }
         break;
 
       case States.CONF_HOLD:
+        this.isGenerating = false;
+
         if (this.stateTime > TIMING.CONF_HOLD) {
           this.transitionTo(States.CONF_FADE);
         }
@@ -365,7 +377,7 @@ class WEApp {
       case States.CONF_FADE:
         if (this.stateTime > TIMING.CONF_FADE) {
           // Fade complete - start next generation cycle
-          this.transitionTo(States.WE_FADEIN);
+          this.transitionTo(States.CONF_GENERATING);
         }
         break;
     }
@@ -383,40 +395,27 @@ class WEApp {
   }
 
   async startGeneration() {
-    // Session stays persistent - no reinitSession() needed
-    // Re-initializing ONNX sessions is the most memory-intensive operation
-    // and causes mobile browsers to crash from OS memory pressure
-    this.isGenerating = true;
-    this.frameCounter = 0;
+      this.frameCounter = 0;
 
-    this.confessionGenerator = this.inferenceEngine.generateStream(
-      TEXT_GRID.TOTAL_CHARS,
-      DIFFUSION_CONFIG.TOTAL_STEPS
-    );
-    this.generateNextFrame();
-  }
+      try {
+          const stream = this.inferenceEngine.generateStream(
+              TEXT_GRID.TOTAL_CHARS,
+              DIFFUSION_CONFIG.TOTAL_STEPS
+          );
 
-  async generateNextFrame() {
-    if (!this.confessionGenerator) return;
+          // The 'for await' loop handles the generator AND the timing
+          for await (const step of stream) {
+              this.previousText = this.activeText;
+              this.activeText = step.text;
+              this.frameCounter++;
+          }
 
-    try {
-      const result = await this.confessionGenerator.next();
-
-      if (!result.done) {
-        this.previousText = this.activeText;
-        this.activeText = result.value.text;
-        this.frameCounter++;
-        requestAnimationFrame(() => this.generateNextFrame());
-      } else {
-        // Generation complete - activeText remains as final output
-        this.isGenerating = false;
-        this.transitionTo(States.CONF_HOLD);
+          this.transitionTo(States.CONF_HOLD);
+      } catch (e) {
+          console.error('Generation failed:', e);
+          this.isGenerating = false;
+          this.transitionTo(States.CONF_HOLD);
       }
-    } catch (e) {
-      // Generation failed - transition to hold with whatever text we have
-      this.isGenerating = false;
-      this.transitionTo(States.CONF_HOLD);
-    }
   }
 
   render(time) {

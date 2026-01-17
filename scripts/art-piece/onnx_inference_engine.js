@@ -40,22 +40,26 @@ class DiffusionInferenceEngine {
     }
 
     async _createSession() {
+        const sessionOptions = {
+            executionProviders: [{
+                name: 'webgpu',
+                device_id: 0,
+                preferredOutputLocation: 'cpu', // Forces GPU data to CPU immediately
+            }],
+            graphOptimizationLevel: 'all',
+            // CRITICAL: Disable the memory pattern reuser. 
+            // This stops ONNX from 'caching' buffers that bloat mobile VRAM.
+            enableMemoryPattern: false, 
+            executionMode: 'sequential'
+        };
+
         try {
-            this.session = await ort.InferenceSession.create(this.modelBytes, {
-                executionProviders: ['webgpu'],
-                graphOptimizationLevel: 'all'
-            });
-            this.usingWebGPU = true;
+            this.session = await ort.InferenceSession.create(this.modelBytes, sessionOptions);
         } catch (e) {
-            this.usingWebGPU = false;
-            try {
-                this.session = await ort.InferenceSession.create(this.modelBytes, {
-                    executionProviders: ['wasm'],
-                    graphOptimizationLevel: 'all'
-                });
-            } catch (e2) {
-                throw new Error('Failed to create ONNX session with any provider');
-            }
+            // Fallback to WASM if WebGPU fails
+            this.session = await ort.InferenceSession.create(this.modelBytes, {
+                executionProviders: ['wasm']
+            });
         }
     }
 
@@ -66,6 +70,7 @@ class DiffusionInferenceEngine {
         this._tokenBuffer = new Int32Array(contextLength);
         this._probBuffer = new Float64Array(this.vocabSize);
         this._inputIdsBigInt = new BigInt64Array(contextLength);
+        this._sigmaBuffer = new Float32Array(1);
     }
 
     /**
@@ -81,42 +86,37 @@ class DiffusionInferenceEngine {
      * Run model inference with explicit tensor lifecycle management
      */
     async runModel(sigma) {
-        // Reuse pre-allocated BigInt64Array, just update values
+        this._sigmaBuffer[0] = sigma;
+        
+        // Convert current token buffer to BigInt for the model input
         for (let i = 0; i < this._tokenBuffer.length; i++) {
             this._inputIdsBigInt[i] = BigInt(this._tokenBuffer[i]);
         }
+        
+        const inputIdsTensor = new ort.Tensor('int64', this._inputIdsBigInt, [1, this._tokenBuffer.length]);
+        const sigmaTensor = new ort.Tensor('float32', this._sigmaBuffer, [1, 1]);
 
-        const inputIdsTensor = new ort.Tensor(
-            'int64',
-            this._inputIdsBigInt,
-            [1, this._tokenBuffer.length]
-        );
-
-        const sigmaTensor = new ort.Tensor(
-            'float32',
-            new Float32Array([sigma]),
-            [1, 1]
-        );
-
-        let flatLogits;
         try {
             const results = await this.session.run({
                 'input_ids': inputIdsTensor,
                 'sigma': sigmaTensor
             });
-            flatLogits = results.logits.data;
 
-            // Explicit disposal of output tensor
-            if (results.logits.dispose) {
-                results.logits.dispose();
+            // FIX: You MUST await the .getData() or use the .data property 
+            // correctly after ensuring the promise has resolved.
+            const rawData = await results.logits.getData(); 
+            const flatLogits = new Float32Array(rawData);
+
+            // NOW it is safe to kill the tensors because the data is in CPU memory
+            for (const key in results) {
+                if (results[key].dispose) results[key].dispose();
             }
+
+            return flatLogits;
         } finally {
-            // Always dispose input tensors
             inputIdsTensor.dispose();
             sigmaTensor.dispose();
         }
-
-        return flatLogits;
     }
 
     /**
@@ -138,44 +138,46 @@ class DiffusionInferenceEngine {
             const offset = i * vocabSize;
             const currentToken = this._tokenBuffer[i];
 
-            // Pass 1: Find max, compute scores, probabilities, and sum in one loop
-            let maxL = flatLogits[offset];
-            for (let j = 1; j < vocabSize; j++) {
+            // 1. Find Max for numerical stability
+            let maxL = -Infinity;
+            for (let j = 0; j < vocabSize; j++) {
                 if (flatLogits[offset + j] > maxL) maxL = flatLogits[offset + j];
             }
 
+            // 2. Compute scoreSum
             let scoreSum = 0;
-            let probSum = 0;
-
             for (let j = 0; j < vocabSize; j++) {
-                const score = Math.exp(flatLogits[offset + j] - maxL);
-                scoreSum += score;
+                // Using Math.exp(logits - maxL) prevents overflow
+                scoreSum += Math.exp(flatLogits[offset + j] - maxL);
             }
 
             const correction = correctionFactor * scoreSum;
+            let probSum = 0;
 
+            // 3. Compute Probabilities
             for (let j = 0; j < vocabSize; j++) {
                 const score = Math.exp(flatLogits[offset + j] - maxL);
                 const stagScore = correction + score * invExpDelta;
                 const transProb = (j === currentToken) ? transDiagProb : transBaseProb;
-                const prob = stagScore * transProb;
+                
+                // Ensure we don't get negative probs from floating point jitter
+                const prob = Math.max(0, stagScore * transProb);
                 probBuffer[j] = prob;
                 probSum += prob;
             }
 
-            // Pass 2: Sample from normalized distribution
+            // 4. Sample
             const rand = Math.random() * probSum;
             let cumsum = 0;
-            let sampled = vocabSize - 1;
+            let sampled = currentToken; // Default to current if sampling fails
 
             for (let j = 0; j < vocabSize; j++) {
                 cumsum += probBuffer[j];
-                if (rand < cumsum) {
+                if (rand <= cumsum) {
                     sampled = j;
                     break;
                 }
             }
-
             this._tokenBuffer[i] = sampled;
         }
     }
@@ -227,8 +229,11 @@ class DiffusionInferenceEngine {
             // Sample in-place (modifies _tokenBuffer directly)
             this.sampleInPlace(flatLogits, deltaSigma);
 
-            // Yield to main thread every step to prevent timeout
-            await this.yieldToMain();
+            // Wait for animation to catch up
+            await new Promise(resolve => requestAnimationFrame(resolve));
+
+            // 100ms "breather" becuase otherise the animation would be too fast
+            await new Promise(resolve => setTimeout(resolve, 100));
 
             yield {
                 step: i + 1,
