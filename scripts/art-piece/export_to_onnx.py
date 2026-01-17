@@ -1,5 +1,5 @@
 """
-Export the discrete diffusion model to ONNX format with INT8 quantization
+Export the discrete diffusion model to ONNX format
 for in-browser inference using ONNX Runtime Web.
 """
 
@@ -15,25 +15,14 @@ import base64
 # Add training directory to path for model imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'training'))
 
-from model import GPT, GPTConfig, GPTQuantized
+from model import GPT, GPTConfig
 
 def export_model_to_onnx(model_path, output_path):
-    """Export PyTorch model to ONNX format (handles both FP32 and QAT models)."""
+    """Export PyTorch model to ONNX format."""
 
     print(f"Loading model from {model_path}...")
 
     checkpoint = torch.load(model_path, map_location='cpu')
-
-    # Check if this is a QAT-trained model
-    is_qat = checkpoint.get('qat_trained', False)
-
-    if is_qat:
-        print(f"\n{'='*60}")
-        print("DETECTED: QAT-Trained Model")
-        print(f"{'='*60}")
-        print("This model was trained with quantization awareness.")
-        print("Will convert to true INT8 before ONNX export.")
-        print(f"{'='*60}\n")
 
     # Extract config
     if 'config' in checkpoint:
@@ -53,35 +42,14 @@ def export_model_to_onnx(model_path, output_path):
 
     print(f"Model config: {config}")
 
-    # Initialize model (QAT or standard)
-    if is_qat:
-        # Create QAT model and load weights
-        # Default to fbgemm backend (x86) - most common for deployment
-        qat_backend = checkpoint.get('qat_backend', 'fbgemm')
-        qat_model = GPTQuantized(config, backend=qat_backend)
-        qat_model.prepare_qat()  # Prepare with fake quantization
-        qat_model.model.load_state_dict(checkpoint['model_state_dict'])
-        qat_model.eval()
-
-        # Convert to true INT8
-        print("\nConverting to true INT8 quantized model...")
-        qat_model.convert_to_quantized()
-
-        # Use the quantized model
-        model = qat_model.model
-        print("✓ Model converted to INT8")
-    else:
-        # Standard FP32 model
-        model = GPT(config)
-        model.load_state_dict(checkpoint['model_state_dict'])
+    # Initialize model
+    model = GPT(config)
+    model.load_state_dict(checkpoint['model_state_dict'])
 
     model.eval()
 
     print(f"Model parameters: {model.get_num_params() / 1e6:.2f}M")
-    if is_qat:
-        print("Model type: INT8 Quantized (from QAT training)")
-    else:
-        print("Model type: FP32")
+    print("Model type: FP32")
 
     # Create dummy inputs for ONNX export
     batch_size = 1
@@ -126,135 +94,7 @@ def export_model_to_onnx(model_path, output_path):
     onnx_size = os.path.getsize(onnx_path) / (1024 * 1024)
     print(f"ONNX model size: {onnx_size:.2f} MB")
 
-    # If model is already QAT-trained, it's already quantized - skip post-training quantization
-    if is_qat:
-        print(f"\n[INFO] Model is already quantized (QAT-trained)")
-        print(f"       Skipping post-training quantization")
-        return onnx_path, config
-
-    # Try to simplify the ONNX model to resolve shape inference issues
-    try:
-        import onnx
-        import onnxsim
-        print("\nSimplifying ONNX model to resolve shape conflicts...")
-
-        onnx_model = onnx.load(onnx_path)
-        simplified_model, check = onnxsim.simplify(
-            onnx_model,
-            check_n=0,  # Skip validation to avoid shape errors
-            skip_shape_inference=False
-        )
-
-        if check or True:  # Always use simplified model even if check fails
-            simplified_path = onnx_path.replace('.onnx', '_simplified.onnx')
-            onnx.save(simplified_model, simplified_path)
-            print(f"[OK] Model simplified successfully")
-            # Use simplified model for quantization
-            onnx_path_for_quantization = simplified_path
-        else:
-            print("[WARNING] Simplification check failed, using original model")
-            onnx_path_for_quantization = onnx_path
-
-    except ImportError:
-        print("\n[INFO] onnx-simplifier not installed, skipping simplification")
-        print("      Install with: pip install onnx-simplifier")
-        onnx_path_for_quantization = onnx_path
-    except Exception as e:
-        print(f"[WARNING] Simplification failed: {str(e)[:100]}")
-        print("          Using original model for quantization")
-        onnx_path_for_quantization = onnx_path
-
-    # Quantize the model
-    try:
-        from onnxruntime.quantization import quantize_dynamic, QuantType
-        from onnxruntime.quantization.shape_inference import quant_pre_process
-        import onnx
-
-        quantized_path = output_path.replace('.onnx', '_quantized.onnx')
-        print(f"\nQuantizing model to INT8...")
-        print("Quantization configuration:")
-        print("  - Type: Dynamic quantization")
-        print("  - Weight type: QInt8 (signed 8-bit)")
-        print("  - Per-tensor quantization (better compatibility)")
-
-        # Run onnxruntime's pre-processing (symbolic shape inference + optimization)
-        print("\nRunning quantization pre-processing...")
-        preprocessed_path = onnx_path_for_quantization.replace('.onnx', '_preprocessed.onnx')
-        quant_pre_process(onnx_path_for_quantization, preprocessed_path)
-        print("[OK] Pre-processing complete")
-
-        try:
-            # Try QUInt8 quantization - more conservative for better accuracy
-            print("\nAttempting QUInt8 quantization (unsigned for better accuracy)...")
-            print("  Using conservative settings to preserve model accuracy")
-
-            quantize_dynamic(
-                preprocessed_path,  # Use preprocessed model
-                quantized_path,
-                weight_type=QuantType.QUInt8,
-                per_channel=False,
-                reduce_range=True,  # Enable reduce_range for better accuracy
-                op_types_to_quantize=['MatMul']  # Only quantize MatMul (most compute-heavy)
-            )
-
-            quantized_size = os.path.getsize(quantized_path) / (1024 * 1024)
-            print(f"[OK] Quantized model (QUInt8) size: {quantized_size:.2f} MB")
-            print(f"[OK] Size reduction: {((onnx_size - quantized_size) / onnx_size * 100):.1f}%")
-
-            # Verify the quantized model is valid
-            try:
-                onnx_model = onnx.load(quantized_path)
-                onnx.checker.check_model(onnx_model)
-                print("[OK] Quantized model validation passed")
-            except Exception as ve:
-                print(f"[WARNING] Quantized model validation warning: {str(ve)[:100]}")
-
-            final_model_path = quantized_path
-
-        except Exception as e:
-            # Fallback to QInt8 if QUInt8 fails
-            print(f"[WARNING] QUInt8 with exclusions failed: {str(e)[:200]}")
-            print("  Trying fallback to basic QUInt8 (no exclusions)...")
-
-            try:
-                quantize_dynamic(
-                    onnx_path_for_quantization,
-                    quantized_path,
-                    weight_type=QuantType.QUInt8
-                )
-
-                quantized_size = os.path.getsize(quantized_path) / (1024 * 1024)
-                print(f"[OK] Quantized model (QUInt8) size: {quantized_size:.2f} MB")
-                print(f"[OK] Size reduction: {((onnx_size - quantized_size) / onnx_size * 100):.1f}%")
-                final_model_path = quantized_path
-
-            except Exception as e2:
-                print(f"[ERROR] QUInt8 quantization also failed: {str(e2)[:200]}")
-                print(f"  Using non-quantized ONNX model instead ({onnx_size:.2f} MB)")
-                print("\nNote: Quantization may fail due to:")
-                print("  - Dynamic shapes in the model")
-                print("  - Unsupported operations")
-                print("  - Shape inference issues")
-                print("  The non-quantized model will still work, just be larger/slower.")
-                final_model_path = onnx_path
-
-    except ImportError as ie:
-        print(f"\n[WARNING] Required library not available: {ie}")
-        print("  Install with: pip install onnxruntime onnx")
-        final_model_path = onnx_path
-
-    # Clean up intermediate files if quantization succeeded
-    if final_model_path == quantized_path:
-        print(f"\nCleaning up intermediate files...")
-        # Clean up simplified model
-        if 'onnx_path_for_quantization' in locals():
-            if onnx_path_for_quantization != onnx_path and os.path.exists(onnx_path_for_quantization):
-                os.remove(onnx_path_for_quantization)
-        # Clean up preprocessed model
-        if 'preprocessed_path' in locals() and os.path.exists(preprocessed_path):
-            os.remove(preprocessed_path)
-
-    return final_model_path, config
+    return onnx_path, config
 
 def export_vocab(dataset_name):
     """Export vocabulary to JSON format (loads from .pkl or .json)."""
@@ -338,7 +178,7 @@ const MODEL_CONFIG = {{
 // Vocabulary mapping
 const VOCAB = {vocab_json};
 
-// ONNX model as base64 (quantized INT8)
+// ONNX model as base64
 // Size: {model_size_mb:.2f} MB
 // Note: In production, split this into chunks if needed
 const MODEL_BASE64 = '{model_base64[:100]}...'; // Truncated for display
@@ -383,7 +223,7 @@ async function loadModel() {{
     print("\n" + "="*60)
     print("SIZE ESTIMATES FOR HTML FILE")
     print("="*60)
-    print(f"Model (quantized):           {model_size_mb:.2f} MB")
+    print(f"Model (FP32):                {model_size_mb:.2f} MB")
     print(f"Vocabulary:                  {vocab_size_kb:.2f} KB")
     print(f"ONNX Runtime Web (~2.5MB):   2.50 MB")
     print(f"JavaScript code (~50KB):     0.05 MB")

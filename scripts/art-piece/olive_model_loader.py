@@ -210,49 +210,6 @@ def _dummy_inputs(model_path):
     return (dummy_input_ids, dummy_sigma)
 
 
-# Optional: Calibration data loader for static quantization
-def _calibration_reader(model_path: str, data_dir: str = None):
-    """
-    Optional: Provide calibration data for static quantization.
-
-    If you want to use static quantization (OnnxStaticQuantization),
-    implement this function to return a data loader.
-
-    For dynamic quantization, this is not needed.
-
-    Args:
-        model_path: Path to the PyTorch checkpoint
-        data_dir: Optional directory containing calibration data
-
-    Yields:
-        Tuples of (input_ids, sigma) for calibration
-    """
-    # Load checkpoint to get configuration
-    checkpoint = torch.load(model_path, map_location='cpu')
-
-    if 'config' in checkpoint:
-        config_dict = checkpoint['config']
-        block_size = config_dict['block_size']
-        vocab_size = config_dict['vocab_size']
-    else:
-        block_size = 256
-        vocab_size = checkpoint.get('vocab_size', 100)
-
-    # Generate a few calibration samples
-    # In a real scenario, you'd load actual data from data_dir
-    num_samples = 10
-
-    for _ in range(num_samples):
-        input_ids = torch.randint(0, vocab_size, (1, block_size), dtype=torch.long)
-        sigma = torch.randn(1, 1, dtype=torch.float32)
-
-        # Olive expects a dictionary with input names as keys
-        yield {
-            "input_ids": input_ids.numpy(),
-            "sigma": sigma.numpy()
-        }
-
-
 if __name__ == "__main__":
     """Test the loader functions"""
     import argparse
