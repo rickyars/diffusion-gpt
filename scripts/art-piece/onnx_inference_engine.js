@@ -56,10 +56,7 @@ class DiffusionInferenceEngine {
         } catch (e) {
             console.log('WebGPU failed, falling back to WASM:', e.message);
             this.session = await ort.InferenceSession.create(this.modelBytes, {
-                executionProviders: ['wasm'],
-                graphOptimizationLevel: 'all',
-                enableMemoryPattern: false,
-                executionMode: 'sequential'
+                executionProviders: ['wasm']
             });
         }
     }
