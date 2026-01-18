@@ -44,21 +44,22 @@ class DiffusionInferenceEngine {
             executionProviders: [{
                 name: 'webgpu',
                 device_id: 0,
-                preferredOutputLocation: 'cpu', // Forces GPU data to CPU immediately
+                preferredOutputLocation: 'cpu',
             }],
             graphOptimizationLevel: 'all',
-            // CRITICAL: Disable the memory pattern reuser. 
-            // This stops ONNX from 'caching' buffers that bloat mobile VRAM.
-            enableMemoryPattern: false, 
+            enableMemoryPattern: false,
             executionMode: 'sequential'
         };
 
         try {
             this.session = await ort.InferenceSession.create(this.modelBytes, sessionOptions);
         } catch (e) {
-            // Fallback to WASM if WebGPU fails
+            console.log('WebGPU failed, falling back to WASM:', e.message);
             this.session = await ort.InferenceSession.create(this.modelBytes, {
-                executionProviders: ['wasm']
+                executionProviders: ['wasm'],
+                graphOptimizationLevel: 'all',
+                enableMemoryPattern: false,
+                executionMode: 'sequential'
             });
         }
     }
@@ -102,10 +103,7 @@ class DiffusionInferenceEngine {
                 'sigma': sigmaTensor
             });
 
-            // FIX: You MUST await the .getData() or use the .data property 
-            // correctly after ensuring the promise has resolved.
-            const rawData = await results.logits.getData(); 
-            const flatLogits = new Float32Array(rawData);
+            const flatLogits = await results.logits.getData();
 
             // NOW it is safe to kill the tensors because the data is in CPU memory
             for (const key in results) {
@@ -194,13 +192,6 @@ class DiffusionInferenceEngine {
     }
 
     /**
-     * Yield to main thread - prevents mobile browser timeout
-     */
-    yieldToMain() {
-        return new Promise(resolve => setTimeout(resolve, 0));
-    }
-
-    /**
      * Generate with real-time streaming, optimized for mobile
      */
     async* generateStream(contextLength = 256, steps = 128) {
@@ -228,9 +219,6 @@ class DiffusionInferenceEngine {
 
             // Sample in-place (modifies _tokenBuffer directly)
             this.sampleInPlace(flatLogits, deltaSigma);
-
-            // Wait for animation to catch up
-            await new Promise(resolve => requestAnimationFrame(resolve));
 
             // 100ms "breather" becuase otherise the animation would be too fast
             await new Promise(resolve => setTimeout(resolve, 100));
