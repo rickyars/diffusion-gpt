@@ -180,7 +180,7 @@ class WEApp {
 
     this.inferenceEngine = null;
     this.confessionGenerator = null;
-    this.activeText = ""; 
+    this.activeText = "";
     this.previousText = ""; // For the highlight effect
     this.isGenerating = false;
 
@@ -1229,6 +1229,59 @@ class WEApp {
     }
   }
 }
+
+// ============================================================================
+// HEARTBEAT & MOBILE KEEP-ALIVE (runs before app init)
+// ============================================================================
+
+// Detect if mobile (or force with ?debug=mobile)
+const debugMode = new URLSearchParams(window.location.search).get('debug');
+const isMobile = debugMode === 'mobile' || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+// Create heartbeat indicator for mobile
+let heartbeatIndicator = null;
+if (isMobile) {
+  heartbeatIndicator = document.createElement('div');
+  heartbeatIndicator.id = 'heartbeat-indicator';
+  heartbeatIndicator.style.position = 'fixed';
+  heartbeatIndicator.style.top = '10px';
+  heartbeatIndicator.style.right = '10px';
+  heartbeatIndicator.style.fontSize = '1.5rem';
+  heartbeatIndicator.style.zIndex = '9999';
+  heartbeatIndicator.style.fontFamily = 'monospace';
+  heartbeatIndicator.style.color = '#33ff33';
+  heartbeatIndicator.textContent = '♥ 0s';
+  document.body.appendChild(heartbeatIndicator);
+}
+
+// Keep page alive - prevent browser from suspending tab
+const startTime = Date.now();
+function heartbeat() {
+  document.body.style.opacity = document.body.style.opacity === '1' ? '0.99' : '1';
+
+  // Update indicator on mobile
+  if (heartbeatIndicator) {
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    heartbeatIndicator.textContent = '♥ ' + elapsed + 's';
+  }
+}
+
+// Run heartbeat every 5 seconds
+setInterval(heartbeat, 5000);
+
+// Prevent sleep on mobile
+if (navigator.wakeLock) {
+  navigator.wakeLock.request('screen').catch(() => {});
+}
+
+// Monitor visibility changes
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    console.log('! Tab hidden - trying to keep alive');
+  } else {
+    console.log('! Tab visible again');
+  }
+});
 
 // ============================================================================
 // START
