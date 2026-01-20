@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Diffusion Test</title>
+  <style>
+    body {
+      font-family: monospace;
+      background: #000;
+      color: #33ff33;
+      padding: 20px;
+    }
+    #log {
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <div id="log"></div>
+
+  <script>
+    // ========== CONFIG ==========
+    const CONFIG = {
+      steps: 64,
+      stepDelayMs: 100,
+      modelUrl: './model.onnx',
+      sigmaMin: 1e-4,
+      sigmaMax: 20.0
+    };
+
+    const MODEL = {
+      blockSize: 256,
+      vocabSize: 100
+    };
+
+    const VOCAB = {"stoi": {"\n": 0, " ": 1, "!": 2, "\"": 3, "#": 4, "$": 5, "%": 6, "&": 7, "'": 8, "(": 9, ")": 10, "*": 11, "+": 12, ",": 13, "-": 14, ".": 15, "/": 16, "0": 17, "1": 18, "2": 19, "3": 20, "4": 21, "5": 22, "6": 23, "7": 24, "8": 25, "9": 26, ":": 27, ";": 28, "=": 29, "?": 30, "A": 31, "B": 32, "C": 33, "D": 34, "E": 35, "F": 36, "G": 37, "H": 38, "I": 39, "J": 40, "K": 41, "L": 42, "M": 43, "N": 44, "O": 45, "P": 46, "Q": 47, "R": 48, "S": 49, "T": 50, "U": 51, "V": 52, "W": 53, "X": 54, "Y": 55, "Z": 56, "[": 57, "\\": 58, "]": 59, "_": 60, "a": 61, "b": 62, "c": 63, "d": 64, "e": 65, "f": 66, "g": 67, "h": 68, "i": 69, "j": 70, "k": 71, "l": 72, "m": 73, "n": 74, "o": 75, "p": 76, "q": 77, "r": 78, "s": 79, "t": 80, "u": 81, "v": 82, "w": 83, "x": 84, "y": 85, "z": 86, "~": 87, "\u00a0": 88, "\u00a3": 89, "\u00e9": 90, "\u2013": 91, "\u2014": 92, "\u2018": 93, "\u2019": 94, "\u201c": 95, "\u201d": 96, "\u2026": 97, "\ufe0f": 98, "\ud83d\ude2d": 99}, "itos": {"0": "\n", "1": " ", "2": "!", "3": "\"", "4": "#", "5": "$", "6": "%", "7": "&", "8": "'", "9": "(", "10": ")", "11": "*", "12": "+", "13": ",", "14": "-", "15": ".", "16": "/", "17": "0", "18": "1", "19": "2", "20": "3", "21": "4", "22": "5", "23": "6", "24": "7", "25": "8", "26": "9", "27": ":", "28": ";", "29": "=", "30": "?", "31": "A", "32": "B", "33": "C", "34": "D", "35": "E", "36": "F", "37": "G", "38": "H", "39": "I", "40": "J", "41": "K", "42": "L", "43": "M", "44": "N", "45": "O", "46": "P", "47": "Q", "48": "R", "49": "S", "50": "T", "51": "U", "52": "V", "53": "W", "54": "X", "55": "Y", "56": "Z", "57": "[", "58": "\\", "59": "]", "60": "_", "61": "a", "62": "b", "63": "c", "64": "d", "65": "e", "66": "f", "67": "g", "68": "h", "69": "i", "70": "j", "71": "k", "72": "l", "73": "m", "74": "n", "75": "o", "76": "p", "77": "q", "78": "r", "79": "s", "80": "t", "81": "u", "82": "v", "83": "w", "84": "x", "85": "y", "86": "z", "87": "~", "88": "\u00a0", "89": "\u00a3", "90": "\u00e9", "91": "\u2013", "92": "\u2014", "93": "\u2018", "94": "\u2019", "95": "\u201c", "96": "\u201d", "97": "\u2026", "98": "\ufe0f", "99": "\ud83d\ude2d"}};
+
+    // ========== iOS CHECK ==========
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+
+    if (isIOS) {
+      document.getElementById('log').textContent = 'iOS is not supported.\n\nPlease view on desktop or Android.';
+    } else {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.2/dist/ort.min.js';
+      script.onload = () => main();
+      document.head.appendChild(script);
+    }
+
+    // ========== UTILITIES ==========
+    const log = msg => {
+      document.getElementById('log').textContent += msg + '\n';
+      console.log(msg);
+    };
+
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+    // ========== DIFFUSION STATE ==========
+    const state = {
+      // Token buffer (Int32 for sampling, converted to BigInt64 for model)
+      tokens: new Int32Array(MODEL.blockSize),
+      tokensBigInt: new BigInt64Array(MODEL.blockSize),
+      sigmaData: new Float32Array(1),
+      probBuffer: new Float64Array(MODEL.vocabSize)
+    };
+
+    // Initialize with random tokens
+    for (let i = 0; i < MODEL.blockSize; i++) {
+      state.tokens[i] = Math.floor(Math.random() * MODEL.vocabSize);
+    }
+
+    // ========== SIGMA SCHEDULE ==========
+    // Geometric interpolation in log space
+    const logSigmaMin = Math.log(CONFIG.sigmaMin);
+    const logSigmaMax = Math.log(CONFIG.sigmaMax);
+
+    function getSigma(t) {
+      return Math.exp((1 - t) * logSigmaMin + t * logSigmaMax);
+    }
+
+    // ========== DECODE ==========
+    function decode() {
+      let result = '';
+      for (let i = 0; i < state.tokens.length; i++) {
+        result += VOCAB.itos[state.tokens[i]] || '?';
+      }
+      return result;
+    }
+
+    // ========== DISCRETE DIFFUSION SAMPLING ==========
+    // This implements the proper discrete diffusion transition kernel.
+    // Unlike simple temperature sampling, this considers:
+    // 1. The current token at each position
+    // 2. Transition probabilities based on the noise schedule
+    // 3. A correction factor for the staggered sampling process
+    function sampleTokens(logits, deltaSigma) {
+      const vocabSize = MODEL.vocabSize;
+      const seqLen = MODEL.blockSize;
+      const probBuffer = state.probBuffer;
+
+      // Precompute transition probabilities from deltaSigma
+      const expNegDelta = Math.exp(-deltaSigma);
+      const invExpNegDelta = 1.0 / expNegDelta;
+      const transitionBase = (1 - expNegDelta) / vocabSize;
+      const transitionDiag = 1 - (vocabSize - 1) * transitionBase;
+      const correctionFactor = (expNegDelta - 1) / (vocabSize * expNegDelta);
+
+      for (let pos = 0; pos < seqLen; pos++) {
+        const offset = pos * vocabSize;
+        const currentToken = state.tokens[pos];
+
+        // Find max logit for numerical stability
+        let maxLogit = -Infinity;
+        for (let v = 0; v < vocabSize; v++) {
+          if (logits[offset + v] > maxLogit) {
+            maxLogit = logits[offset + v];
+          }
+        }
+
+        // Compute sum of exp(logits) for normalization
+        let expSum = 0;
+        for (let v = 0; v < vocabSize; v++) {
+          expSum += Math.exp(logits[offset + v] - maxLogit);
+        }
+
+        // Compute sampling probabilities with diffusion transition kernel
+        const correction = correctionFactor * expSum;
+        let probSum = 0;
+
+        for (let v = 0; v < vocabSize; v++) {
+          const expLogit = Math.exp(logits[offset + v] - maxLogit);
+          const score = correction + expLogit * invExpNegDelta;
+          const transProb = (v === currentToken) ? transitionDiag : transitionBase;
+          const prob = Math.max(0, score * transProb);
+          probBuffer[v] = prob;
+          probSum += prob;
+        }
+
+        // Sample from distribution
+        const rand = Math.random() * probSum;
+        let cumsum = 0;
+        let sampled = currentToken;
+
+        for (let v = 0; v < vocabSize; v++) {
+          cumsum += probBuffer[v];
+          if (rand <= cumsum) {
+            sampled = v;
+            break;
+          }
+        }
+
+        state.tokens[pos] = sampled;
+      }
+    }
+
+    // ========== MODEL INFERENCE ==========
+    async function runInference(session, sigma) {
+      // Convert Int32 tokens to BigInt64 for model input
+      for (let i = 0; i < MODEL.blockSize; i++) {
+        state.tokensBigInt[i] = BigInt(state.tokens[i]);
+      }
+
+      state.sigmaData[0] = sigma;
+
+      const inputTensor = new ort.Tensor('int64', state.tokensBigInt, [1, MODEL.blockSize]);
+      const sigmaTensor = new ort.Tensor('float32', state.sigmaData, [1, 1]);
+
+      const results = await session.run({
+        'input_ids': inputTensor,
+        'sigma': sigmaTensor
+      });
+
+      const logits = await results.logits.getData();
+
+      // Cleanup
+      for (const key in results) {
+        if (results[key]?.dispose) results[key].dispose();
+      }
+      inputTensor.dispose();
+      sigmaTensor.dispose();
+
+      return logits;
+    }
+
+    // ========== DIFFUSION LOOP ==========
+    async function runDiffusion(session) {
+      const steps = CONFIG.steps;
+      const eps = 1e-5;
+      const stepSize = (1 - eps) / steps;
+
+      log(`Running ${steps} diffusion steps...`);
+
+      for (let i = 0; i < steps; i++) {
+        const t = 1 - (i + 1) * stepSize;
+        const sigma = getSigma(t);
+
+        // Calculate delta sigma for transition kernel
+        const deltaSigma = (i < steps - 1)
+          ? sigma - getSigma(t - stepSize)
+          : sigma;
+
+        const logits = await runInference(session, sigma);
+        sampleTokens(logits, deltaSigma);
+
+        log(`Step ${i + 1}/${steps} | σ=${sigma.toFixed(4)}`);
+        await sleep(CONFIG.stepDelayMs);
+      }
+
+      log('\n' + decode());
+    }
+
+    // ========== MAIN ==========
+    async function main() {
+      const forceWasm = window.location.search.includes('wasm');
+
+      log('Loading model...');
+
+      const webgpuOptions = {
+        executionProviders: [{ name: 'webgpu', preferredOutputLocation: 'cpu' }],
+        graphOptimizationLevel: 'all'
+      };
+
+      const wasmOptions = {
+        executionProviders: ['wasm'],
+        executionMode: 'sequential',
+        graphOptimizationLevel: 'basic'
+      };
+
+      let session;
+      let backend;
+
+      if (!forceWasm) {
+        try {
+          session = await ort.InferenceSession.create(CONFIG.modelUrl, webgpuOptions);
+          backend = 'webgpu';
+        } catch (e) {
+          log('WebGPU failed: ' + e.message);
+        }
+      }
+
+      if (!session) {
+        session = await ort.InferenceSession.create(CONFIG.modelUrl, wasmOptions);
+        backend = 'wasm';
+      }
+
+      log('Backend: ' + backend);
+      await runDiffusion(session);
+    }
+  </script>
+</body>
+</html>
