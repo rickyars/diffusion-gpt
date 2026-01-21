@@ -44,7 +44,6 @@ vocab/*
 !vocab/.gitkeep
 
 # WE art piece (generated HTML, keep template only)
-scripts/art-piece/we.html
 outputs/*
 !outputs/.gitkeep
 

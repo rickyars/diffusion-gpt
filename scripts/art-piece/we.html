@@ -1,0 +1,1112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WE</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+      font-family: 'Courier New', monospace;
+    }
+    #textCanvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      visibility: hidden;
+    }
+    #crtCanvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="textCanvas"></canvas>
+  <canvas id="crtCanvas"></canvas>
+
+  <script>
+'use strict';
+
+// ============================================================================
+// CONFIG - All timing and effect values parameterized
+// ============================================================================
+
+const CONFIG = {
+  // Inference
+  steps: 64,
+  stepDelayMs: 100,
+  modelUrl: './model.onnx',
+  sigmaMin: 1e-4,
+  sigmaMax: 20.0,
+
+  // Timing (ms)
+  timing: {
+    weDuration: 2000,
+    confessionHold: 4000,
+    confessionFade: 2000
+  },
+
+  // Effects
+  effects: {
+    flickerIntensity: 0.5,
+    flickerSpeed: 8.0,
+    glitchIntensity: 0.003,
+    rgbSplitChance: 0.05,
+    rgbSplitOffset: 2
+  }
+};
+
+const MODEL = {
+  blockSize: 256,
+  vocabSize: 100
+};
+
+const TEXT_GRID = {
+  cols: 32,
+  rows: 8,
+  total: 256
+};
+
+const VOCAB = {"stoi": {"\n": 0, " ": 1, "!": 2, "\"": 3, "#": 4, "$": 5, "%": 6, "&": 7, "'": 8, "(": 9, ")": 10, "*": 11, "+": 12, ",": 13, "-": 14, ".": 15, "/": 16, "0": 17, "1": 18, "2": 19, "3": 20, "4": 21, "5": 22, "6": 23, "7": 24, "8": 25, "9": 26, ":": 27, ";": 28, "=": 29, "?": 30, "A": 31, "B": 32, "C": 33, "D": 34, "E": 35, "F": 36, "G": 37, "H": 38, "I": 39, "J": 40, "K": 41, "L": 42, "M": 43, "N": 44, "O": 45, "P": 46, "Q": 47, "R": 48, "S": 49, "T": 50, "U": 51, "V": 52, "W": 53, "X": 54, "Y": 55, "Z": 56, "[": 57, "\\": 58, "]": 59, "_": 60, "a": 61, "b": 62, "c": 63, "d": 64, "e": 65, "f": 66, "g": 67, "h": 68, "i": 69, "j": 70, "k": 71, "l": 72, "m": 73, "n": 74, "o": 75, "p": 76, "q": 77, "r": 78, "s": 79, "t": 80, "u": 81, "v": 82, "w": 83, "x": 84, "y": 85, "z": 86, "~": 87, "\u00a0": 88, "\u00a3": 89, "\u00e9": 90, "\u2013": 91, "\u2014": 92, "\u2018": 93, "\u2019": 94, "\u201c": 95, "\u201d": 96, "\u2026": 97, "\ufe0f": 98, "\ud83d\ude2d": 99}, "itos": {"0": "\n", "1": " ", "2": "!", "3": "\"", "4": "#", "5": "$", "6": "%", "7": "&", "8": "'", "9": "(", "10": ")", "11": "*", "12": "+", "13": ",", "14": "-", "15": ".", "16": "/", "17": "0", "18": "1", "19": "2", "20": "3", "21": "4", "22": "5", "23": "6", "24": "7", "25": "8", "26": "9", "27": ":", "28": ";", "29": "=", "30": "?", "31": "A", "32": "B", "33": "C", "34": "D", "35": "E", "36": "F", "37": "G", "38": "H", "39": "I", "40": "J", "41": "K", "42": "L", "43": "M", "44": "N", "45": "O", "46": "P", "47": "Q", "48": "R", "49": "S", "50": "T", "51": "U", "52": "V", "53": "W", "54": "X", "55": "Y", "56": "Z", "57": "[", "58": "\\", "59": "]", "60": "_", "61": "a", "62": "b", "63": "c", "64": "d", "65": "e", "66": "f", "67": "g", "68": "h", "69": "i", "70": "j", "71": "k", "72": "l", "73": "m", "74": "n", "75": "o", "76": "p", "77": "q", "78": "r", "79": "s", "80": "t", "81": "u", "82": "v", "83": "w", "84": "x", "85": "y", "86": "z", "87": "~", "88": "\u00a0", "89": "\u00a3", "90": "\u00e9", "91": "\u2013", "92": "\u2014", "93": "\u2018", "94": "\u2019", "95": "\u201c", "96": "\u201d", "97": "\u2026", "98": "\ufe0f", "99": "\ud83d\ude2d"}};
+
+// ============================================================================
+// CANVAS SETUP
+// ============================================================================
+
+const canvas = document.getElementById('textCanvas');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  resizeCRT();
+}
+window.addEventListener('resize', resize);
+// Note: resize() called after CRT init
+
+// ============================================================================
+// STATE MACHINE
+// ============================================================================
+
+const State = {
+  WE: 'WE',
+  GENERATING: 'GENERATING',
+  HOLDING: 'HOLDING',
+  FADING: 'FADING'
+};
+
+const app = {
+  state: State.WE,
+  stateStart: 0,
+  session: null,
+  currentStep: 0,
+  previousText: '',
+  finalText: ''
+};
+
+// ============================================================================
+// 2D CANVAS EFFECTS
+// ============================================================================
+
+function calcFlicker(time) {
+  const speed = CONFIG.effects.flickerSpeed;
+  const intensity = CONFIG.effects.flickerIntensity;
+
+  // Multi-frequency flicker for organic CRT feel
+  let flicker = Math.sin(time * speed) * 0.4 +
+                Math.sin(time * speed * 1.7) * 0.3 +
+                Math.sin(time * speed * 3.1) * 0.2 +
+                Math.sin(time * speed * 7.3) * 0.1;
+
+  // Normalize to 0-1 range then scale by intensity
+  flicker = (flicker + 1.0) * 0.5;
+  flicker = 1.0 - (intensity * (1.0 - flicker));
+
+  // Occasional random brightness dips
+  if (Math.random() < 0.01) {
+    flicker *= 0.85 + Math.random() * 0.1;
+  }
+
+  return flicker;
+}
+
+function calcGlitchOffset(w, h) {
+  const intensity = CONFIG.effects.glitchIntensity;
+  return {
+    x: (Math.random() - 0.5) * intensity * w,
+    y: (Math.random() - 0.5) * intensity * h
+  };
+}
+
+function shouldRGBSplit() {
+  return Math.random() < CONFIG.effects.rgbSplitChance;
+}
+
+function drawWithEffects(drawFn, w, h) {
+  const time = performance.now() / 1000;
+  const flicker = calcFlicker(time);
+  const offset = calcGlitchOffset(w, h);
+  const doRGBSplit = shouldRGBSplit();
+
+  // RGB split (draw red and blue channels offset)
+  if (doRGBSplit) {
+    const rgbOffset = CONFIG.effects.rgbSplitOffset;
+    ctx.globalAlpha = 0.3;
+
+    ctx.fillStyle = 'rgb(255, 0, 0)';
+    drawFn(offset.x - rgbOffset, offset.y);
+
+    ctx.fillStyle = 'rgb(0, 0, 255)';
+    drawFn(offset.x + rgbOffset, offset.y);
+
+    ctx.globalAlpha = 1.0;
+  }
+
+  return { flicker, offset };
+}
+
+// ============================================================================
+// WEBGL CRT POST-PROCESSING WITH BLOOM
+// ============================================================================
+
+const crtCanvas = document.getElementById('crtCanvas');
+
+// WebGL state
+const webgl = {
+  gl: null,
+  vao: null,
+  textures: {},
+  framebuffers: {},
+  programs: {},
+  uniforms: {},
+  bloomSize: { width: 0, height: 0 }
+};
+
+// Shared vertex shader (fullscreen quad)
+const VERTEX_SHADER = `#version 300 es
+in vec2 aPosition;
+out vec2 vUV;
+void main() {
+  vUV = aPosition * 0.5 + 0.5;
+  gl_Position = vec4(aPosition, 0.0, 1.0);
+}`;
+
+// Bright pass: extract glowing pixels for bloom
+const BRIGHT_PASS_SHADER = `#version 300 es
+precision highp float;
+in vec2 vUV;
+out vec4 fragColor;
+uniform sampler2D uTexture;
+
+void main() {
+  vec2 uv = vec2(vUV.x, 1.0 - vUV.y);
+  vec4 color = texture(uTexture, uv);
+  float brightness = color.g;
+  float threshold = 0.2;
+  float intensity = max(0.0, brightness - threshold) / (1.0 - threshold);
+  fragColor = vec4(color.rgb * intensity * 1.5, 1.0);
+}`;
+
+// Gaussian blur (separable, 9-tap)
+const BLUR_SHADER = `#version 300 es
+precision highp float;
+in vec2 vUV;
+out vec4 fragColor;
+uniform sampler2D uTexture;
+uniform vec2 uDirection;
+uniform vec2 uResolution;
+
+void main() {
+  vec2 texel = 1.0 / uResolution;
+  vec4 sum = vec4(0.0);
+  sum += texture(uTexture, vUV - 4.0 * uDirection * texel) * 0.016216;
+  sum += texture(uTexture, vUV - 3.0 * uDirection * texel) * 0.054054;
+  sum += texture(uTexture, vUV - 2.0 * uDirection * texel) * 0.121621;
+  sum += texture(uTexture, vUV - 1.0 * uDirection * texel) * 0.194595;
+  sum += texture(uTexture, vUV) * 0.227027;
+  sum += texture(uTexture, vUV + 1.0 * uDirection * texel) * 0.194595;
+  sum += texture(uTexture, vUV + 2.0 * uDirection * texel) * 0.121621;
+  sum += texture(uTexture, vUV + 3.0 * uDirection * texel) * 0.054054;
+  sum += texture(uTexture, vUV + 4.0 * uDirection * texel) * 0.016216;
+  fragColor = sum;
+}`;
+
+// Final CRT composite with bloom
+const CRT_SHADER = `#version 300 es
+precision highp float;
+in vec2 vUV;
+out vec4 fragColor;
+
+uniform sampler2D uTexture;
+uniform sampler2D uBloom;
+uniform vec2 uResolution;
+uniform float uTime;
+
+float random(vec2 st) {
+  return fract(sin(dot(st, vec2(12.9898, 78.233))) * 43758.5453);
+}
+
+float noise(vec2 uv, float t) {
+  return random(uv * 1.5 + vec2(t * 0.05, t * 0.03));
+}
+
+vec2 barrel(vec2 uv, float amt) {
+  vec2 cc = uv - 0.5;
+  float aspect = uResolution.x / uResolution.y;
+  vec2 adj = cc;
+  if (aspect > 1.0) adj.x /= aspect;
+  else adj.y *= aspect;
+  float d = dot(adj, adj);
+  return uv + cc * (1.0 + d) * d * amt;
+}
+
+vec3 scanlines(vec3 c, vec2 uv) {
+  float count = uResolution.y * 0.75;
+  float pattern = sin(uv.y * count * 6.283185);
+  float mask = smoothstep(-0.3, 0.3, pattern);
+  float effect = mix(0.5, 1.0, mask);
+
+  vec3 offsets = vec3(1.571) * vec3(0.0, -0.667, -1.333);
+  float px = uResolution.x * 0.5;
+  vec3 rgb = (2.5 + sin(uv.x * px * 6.283185 + offsets)) / 3.5;
+
+  return c * effect * rgb;
+}
+
+vec3 phosphorGlow(vec3 color, vec3 bloom) {
+  vec3 phosphor = vec3(0.2, 1.0, 0.3);
+  float luminance = dot(bloom, vec3(0.2, 0.7, 0.1));
+  return color + phosphor * luminance * 3.0 + bloom * 2.0;
+}
+
+void main() {
+  vec2 uv = vUV;
+
+  // Barrel distortion
+  vec2 scaled = (uv - 0.5) * 0.92 + 0.5;
+  vec2 distorted = barrel(scaled, 0.25);
+  distorted = clamp(distorted, 0.0, 1.0);
+
+  // Horizontal sync glitch
+  float line = floor(distorted.y * 20.0);
+  float r = random(vec2(line, floor(uTime * 2.0)));
+  if (r > 0.97) {
+    distorted.x += sin(uTime * 30.0 + line) * 0.01;
+  }
+
+  // Chromatic aberration
+  vec2 center = distorted - 0.5;
+  float dist = length(center);
+  vec2 dir = normalize(center + 0.0001);
+  float amt = dist * 0.008;
+
+  vec2 uvFlipped = vec2(distorted.x, 1.0 - distorted.y);
+  vec2 dirFlipped = vec2(dir.x, -dir.y);
+
+  float red = texture(uTexture, uvFlipped + dirFlipped * amt).r;
+  float grn = texture(uTexture, uvFlipped).g;
+  float blu = texture(uTexture, uvFlipped - dirFlipped * amt).b;
+  vec3 color = vec3(red, grn, blu);
+
+  // Bloom / phosphor glow
+  vec3 bloom = texture(uBloom, distorted).rgb;
+  color = phosphorGlow(color, bloom);
+
+  // Scanlines
+  color = scanlines(color, distorted);
+
+  // Vignette
+  vec2 vc = (uv - 0.5) * 2.0;
+  float vignette = 1.0 - smoothstep(0.5, 1.5, length(vc));
+  color *= vignette;
+
+  // Noise
+  float n = noise(uv, uTime) * 0.15;
+  color += n - 0.075;
+
+  // Multi-frequency flicker (more organic)
+  float flicker = sin(uTime * 2.3) * 0.015 +
+                  sin(uTime * 5.7) * 0.008 +
+                  sin(uTime * 11.3) * 0.004 +
+                  sin(uTime * 23.1) * 0.002;
+  color *= (1.0 + flicker);
+
+  // Background glow on dark areas
+  float dark = 1.0 - dot(color, vec3(0.333));
+  float staticNoise = noise(uv * 3.0, uTime * 2.0) * noise(uv * 5.0, uTime * 1.5);
+  color += vec3(0.0, 0.02, 0.01) * staticNoise * dark * 0.5;
+
+  fragColor = vec4(color, 1.0);
+}`;
+
+function compileShader(gl, type, source) {
+  const shader = gl.createShader(type);
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    console.error('Shader error:', gl.getShaderInfoLog(shader));
+    gl.deleteShader(shader);
+    return null;
+  }
+  return shader;
+}
+
+function createProgram(gl, vsSource, fsSource) {
+  const vs = compileShader(gl, gl.VERTEX_SHADER, vsSource);
+  const fs = compileShader(gl, gl.FRAGMENT_SHADER, fsSource);
+  if (!vs || !fs) return null;
+
+  const program = gl.createProgram();
+  gl.attachShader(program, vs);
+  gl.attachShader(program, fs);
+  gl.linkProgram(program);
+
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    console.error('Link error:', gl.getProgramInfoLog(program));
+    return null;
+  }
+  return program;
+}
+
+function createTexture(gl, width, height) {
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  return tex;
+}
+
+function createFramebuffer(gl, texture) {
+  const fb = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  return fb;
+}
+
+function initCRT() {
+  const gl = crtCanvas.getContext('webgl2', { alpha: false, antialias: false });
+  if (!gl) {
+    console.warn('WebGL2 not available');
+    crtCanvas.style.display = 'none';
+    canvas.style.visibility = 'visible';
+    return false;
+  }
+  webgl.gl = gl;
+
+  // Create programs
+  webgl.programs.bright = createProgram(gl, VERTEX_SHADER, BRIGHT_PASS_SHADER);
+  webgl.programs.blur = createProgram(gl, VERTEX_SHADER, BLUR_SHADER);
+  webgl.programs.crt = createProgram(gl, VERTEX_SHADER, CRT_SHADER);
+
+  if (!webgl.programs.bright || !webgl.programs.blur || !webgl.programs.crt) {
+    return false;
+  }
+
+  // Cache uniform locations
+  webgl.uniforms.bright = {
+    uTexture: gl.getUniformLocation(webgl.programs.bright, 'uTexture')
+  };
+  webgl.uniforms.blur = {
+    uTexture: gl.getUniformLocation(webgl.programs.blur, 'uTexture'),
+    uDirection: gl.getUniformLocation(webgl.programs.blur, 'uDirection'),
+    uResolution: gl.getUniformLocation(webgl.programs.blur, 'uResolution')
+  };
+  webgl.uniforms.crt = {
+    uTexture: gl.getUniformLocation(webgl.programs.crt, 'uTexture'),
+    uBloom: gl.getUniformLocation(webgl.programs.crt, 'uBloom'),
+    uResolution: gl.getUniformLocation(webgl.programs.crt, 'uResolution'),
+    uTime: gl.getUniformLocation(webgl.programs.crt, 'uTime')
+  };
+
+  // Fullscreen quad VAO
+  const verts = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
+  const vbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+  gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STATIC_DRAW);
+
+  webgl.vao = gl.createVertexArray();
+  gl.bindVertexArray(webgl.vao);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  gl.bindVertexArray(null);
+
+  // Source texture (from 2D canvas)
+  webgl.textures.source = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, webgl.textures.source);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+  return true;
+}
+
+function setupBloomBuffers() {
+  const gl = webgl.gl;
+  if (!gl) return;
+
+  // Bloom at 1/4 resolution for performance
+  const w = Math.floor(crtCanvas.width / 4);
+  const h = Math.floor(crtCanvas.height / 4);
+
+  if (w === webgl.bloomSize.width && h === webgl.bloomSize.height) return;
+  webgl.bloomSize = { width: w, height: h };
+
+  // Delete old textures/framebuffers if they exist
+  if (webgl.textures.bloom) gl.deleteTexture(webgl.textures.bloom);
+  if (webgl.textures.blur) gl.deleteTexture(webgl.textures.blur);
+  if (webgl.framebuffers.bloom) gl.deleteFramebuffer(webgl.framebuffers.bloom);
+  if (webgl.framebuffers.blur) gl.deleteFramebuffer(webgl.framebuffers.blur);
+
+  // Create bloom textures and framebuffers
+  webgl.textures.bloom = createTexture(gl, w, h);
+  webgl.textures.blur = createTexture(gl, w, h);
+  webgl.framebuffers.bloom = createFramebuffer(gl, webgl.textures.bloom);
+  webgl.framebuffers.blur = createFramebuffer(gl, webgl.textures.blur);
+}
+
+function resizeCRT() {
+  crtCanvas.width = window.innerWidth;
+  crtCanvas.height = window.innerHeight;
+  if (webgl.gl) {
+    setupBloomBuffers();
+  }
+}
+
+function renderCRT() {
+  const gl = webgl.gl;
+  if (!gl) return;
+
+  const time = performance.now() / 1000;
+  const w = crtCanvas.width;
+  const h = crtCanvas.height;
+  const bw = webgl.bloomSize.width;
+  const bh = webgl.bloomSize.height;
+
+  gl.bindVertexArray(webgl.vao);
+
+  // Upload source canvas
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, webgl.textures.source);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
+
+  // Pass 1: Bright pass → bloom FBO
+  gl.bindFramebuffer(gl.FRAMEBUFFER, webgl.framebuffers.bloom);
+  gl.viewport(0, 0, bw, bh);
+  gl.useProgram(webgl.programs.bright);
+  gl.uniform1i(webgl.uniforms.bright.uTexture, 0);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+  // Pass 2: Horizontal blur → blur FBO
+  gl.bindFramebuffer(gl.FRAMEBUFFER, webgl.framebuffers.blur);
+  gl.useProgram(webgl.programs.blur);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, webgl.textures.bloom);
+  gl.uniform1i(webgl.uniforms.blur.uTexture, 0);
+  gl.uniform2f(webgl.uniforms.blur.uDirection, 1.0, 0.0);
+  gl.uniform2f(webgl.uniforms.blur.uResolution, bw, bh);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+  // Pass 3: Vertical blur → bloom FBO
+  gl.bindFramebuffer(gl.FRAMEBUFFER, webgl.framebuffers.bloom);
+  gl.bindTexture(gl.TEXTURE_2D, webgl.textures.blur);
+  gl.uniform2f(webgl.uniforms.blur.uDirection, 0.0, 1.0);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+  // Pass 4: Final CRT composite → screen
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, w, h);
+  gl.useProgram(webgl.programs.crt);
+
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, webgl.textures.source);
+  gl.uniform1i(webgl.uniforms.crt.uTexture, 0);
+
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_2D, webgl.textures.bloom);
+  gl.uniform1i(webgl.uniforms.crt.uBloom, 1);
+
+  gl.uniform2f(webgl.uniforms.crt.uResolution, w, h);
+  gl.uniform1f(webgl.uniforms.crt.uTime, time);
+
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+// ============================================================================
+// TEXT RENDERING
+// ============================================================================
+
+function renderText(text) {
+  const w = canvas.width;
+  const h = canvas.height;
+
+  // Clear
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, w, h);
+
+  // Pad/truncate text to grid size
+  const paddedText = text.padEnd(TEXT_GRID.total, ' ').substring(0, TEXT_GRID.total);
+
+  // Calculate font size based on screen
+  const fontSize = Math.max(16, h * 0.028);
+  ctx.font = `${fontSize}px 'Courier New', monospace`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#33ff33';
+  ctx.shadowColor = '#33ff33';
+  ctx.shadowBlur = fontSize * 0.25;
+
+  // Layout
+  const lineHeight = fontSize * 1.5;
+  const totalHeight = TEXT_GRID.rows * lineHeight;
+  const startY = (h - totalHeight) / 2;
+
+  // Draw each line
+  for (let row = 0; row < TEXT_GRID.rows; row++) {
+    const line = paddedText.substring(row * TEXT_GRID.cols, (row + 1) * TEXT_GRID.cols);
+    const y = startY + row * lineHeight + lineHeight / 2;
+    ctx.fillText(line, w / 2, y);
+  }
+}
+
+// ============================================================================
+// WE INTRO SCREEN
+// ============================================================================
+
+function renderWE() {
+  const w = canvas.width;
+  const h = canvas.height;
+  const time = performance.now() / 1000;
+
+  // Clear
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, w, h);
+
+  // Large centered WE text
+  const fontSize = h * 0.2;
+  ctx.font = `900 ${fontSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.shadowBlur = fontSize * 0.3;
+
+  // Apply effects
+  const flicker = calcFlicker(time);
+  const offset = calcGlitchOffset(w, h);
+  const doRGBSplit = shouldRGBSplit();
+
+  // RGB split
+  if (doRGBSplit) {
+    const rgbOffset = CONFIG.effects.rgbSplitOffset;
+    ctx.shadowColor = 'transparent';
+
+    ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
+    ctx.fillText('WE', w / 2 + offset.x - rgbOffset, h / 2 + offset.y);
+
+    ctx.fillStyle = 'rgba(0, 0, 255, 0.3)';
+    ctx.fillText('WE', w / 2 + offset.x + rgbOffset, h / 2 + offset.y);
+  }
+
+  // Main green text with flicker
+  const alpha = flicker;
+  ctx.fillStyle = `rgba(51, 255, 51, ${alpha})`;
+  ctx.shadowColor = `rgba(51, 255, 51, ${alpha})`;
+  ctx.fillText('WE', w / 2 + offset.x, h / 2 + offset.y);
+}
+
+// ============================================================================
+// ANSI HEADER + LOADING BAR
+// ============================================================================
+
+const HEADER_LINES = [
+  '             ╓',
+  '     ,▄P▀╙  ▄██▄,                              ╓█                                          ╓▌',
+  '   ▄██═,▄▄█▌███▀└                          ╓▄▄▀████▄∞                                    ¬████▄',
+  ' ,███▀▀████▌ █▌                             ▀██`██                                        ▀█`',
+  ' ████⌐ ████▌ ▐▌        ▄█,      ▄▄    ▄▄     ███ ¬▌        ▄█         ╓█▄          ▄█      ,▌        ▄█µ      ▄▄    ▄▄',
+  '█████⌐ ████▌ └    ▄▄▄█▀█████▄ <████▄∞████▄ ▀▀███▀▀▌  -▄▄▄█▀████⌐.▄▄▄█▀████W  ╓▄▄▄▌▀████∞ ¬▄███▄ ▄▄▄█▀█████▄ <████▄∞████▄',
+  '█████⌐ ████▌       ███` ╙███   ▐██▌  ▐███   ¬███  "   "███  ▀█▌  ▐███  ╙▀     ███▌  ▀▀    ▐███   ███═ "███⌐  ▐██▌  ▐███',
+  '█████⌐ ████▌ⁿ╙▀▄   ██`   ███   ▐██▌  ▐██▌   ¬███       ███`,█▀   ▐████▄▄▄██   ████N▄▄▄█▌  j███   ███═  ███   ▐██▌  ▐██▌',
+  ' ████▌ █████Nw  █  ███µ  ███   ▐██▌  ▐██▌   ]███       ███▀            ▐███   "     ███▌  ▐███   ███▄  ███   ▐██▌  ▐██▌',
+  '  ▀███▄█▀-      █ Æ████▄;███▌ ▄████▄╓████▄ ╓█████▄▄. .▓████▄▄;,  ╓▄██▄ ▐███▄  ▄▄██▄ ████ ╓████▄ Æ████▄ç████ ╓████▄╓████▄',
+  '   -▀███▄    ╓▄▀    ¬▀██▀-     ╙██"  "██╙    ╙██▀       ╙▀██▀   █▀▀▀██▀`    █▀▀███▀"     `██▀    -▀██▀-     ╙██╙  \'██▀',
+  '      -▀▀▀▀▀▀¬                                                                   `',
+];
+
+function renderConfession(text, step, totalSteps, prevText = '', opacity = 1.0) {
+  const w = canvas.width;
+  const h = canvas.height;
+  const time = performance.now() / 1000;
+
+  // Clear
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, w, h);
+
+  // Apply effects
+  const flicker = calcFlicker(time);
+  const offset = calcGlitchOffset(w, h);
+  const doRGBSplit = shouldRGBSplit();
+  const effectiveOpacity = opacity * flicker;
+
+  // Calculate font size based on screen
+  const fontSize = Math.max(16, h * 0.028);
+  ctx.fillStyle = `rgba(51, 255, 51, ${effectiveOpacity})`;
+  ctx.shadowColor = `rgba(51, 255, 51, ${effectiveOpacity})`;
+  ctx.shadowBlur = fontSize * 0.25;
+
+  // Layout for confession text
+  const lineHeight = fontSize * 1.5;
+  const totalTextHeight = TEXT_GRID.rows * lineHeight;
+  const textStartY = (h - totalTextHeight) / 2;
+  const charWidth = fontSize * 0.6; // Monospace ratio
+
+  // Helper to draw all content at given offset
+  function drawAllContent(ox, oy) {
+    // Draw header above text (fixed sizes to match original)
+    const headerFontSize = 4;
+    const headerLineHeight = 5;
+    ctx.font = `${headerFontSize}px 'Courier New', monospace`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.shadowBlur = headerFontSize * 0.25;
+
+    // Find max header width for centering
+    let maxHeaderWidth = 0;
+    for (const line of HEADER_LINES) {
+      const width = ctx.measureText(line).width;
+      if (width > maxHeaderWidth) maxHeaderWidth = width;
+    }
+    const headerStartX = (w - maxHeaderWidth) / 2;
+    const headerStartY = textStartY - (HEADER_LINES.length * headerLineHeight) - 30;
+
+    for (let i = 0; i < HEADER_LINES.length; i++) {
+      ctx.fillText(HEADER_LINES[i], headerStartX + ox, headerStartY + i * headerLineHeight + oy);
+    }
+
+    // Draw confession text
+    ctx.font = `${fontSize}px 'Courier New', monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowBlur = fontSize * 0.25;
+
+    const paddedText = text.padEnd(TEXT_GRID.total, ' ').substring(0, TEXT_GRID.total);
+    for (let row = 0; row < TEXT_GRID.rows; row++) {
+      const line = paddedText.substring(row * TEXT_GRID.cols, (row + 1) * TEXT_GRID.cols);
+      const y = textStartY + row * lineHeight + lineHeight / 2;
+      ctx.fillText(line, w / 2 + ox, y + oy);
+    }
+  }
+
+  // RGB split effect
+  if (doRGBSplit) {
+    const rgbOffset = CONFIG.effects.rgbSplitOffset;
+    ctx.shadowColor = 'transparent';
+
+    ctx.fillStyle = `rgba(255, 0, 0, ${effectiveOpacity * 0.3})`;
+    drawAllContent(offset.x - rgbOffset, offset.y);
+
+    ctx.fillStyle = `rgba(0, 0, 255, ${effectiveOpacity * 0.3})`;
+    drawAllContent(offset.x + rgbOffset, offset.y);
+
+    ctx.fillStyle = `rgba(51, 255, 51, ${effectiveOpacity})`;
+    ctx.shadowColor = `rgba(51, 255, 51, ${effectiveOpacity})`;
+  }
+
+  // Main green content
+  drawAllContent(offset.x, offset.y);
+
+  // Draw change highlighting (yellow glow on changed chars)
+  const paddedText = text.padEnd(TEXT_GRID.total, ' ').substring(0, TEXT_GRID.total);
+  if (prevText && step < totalSteps) {
+    const paddedPrev = prevText.padEnd(TEXT_GRID.total, ' ').substring(0, TEXT_GRID.total);
+    ctx.fillStyle = `rgba(255, 255, 180, ${effectiveOpacity * 0.8})`;
+    ctx.shadowColor = `rgba(255, 255, 0, ${effectiveOpacity * 0.9})`;
+    ctx.shadowBlur = fontSize * 0.5;
+    ctx.font = `${fontSize}px 'Courier New', monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    for (let i = 0; i < TEXT_GRID.total; i++) {
+      const char = paddedText[i];
+      const prevChar = paddedPrev[i];
+      if (char !== prevChar && char !== ' ') {
+        const row = Math.floor(i / TEXT_GRID.cols);
+        const col = i % TEXT_GRID.cols;
+        const centerOffset = (TEXT_GRID.cols - 1) / 2;
+        const x = w / 2 + (col - centerOffset) * charWidth + offset.x;
+        const y = textStartY + row * lineHeight + lineHeight / 2 + offset.y;
+        ctx.fillText(char, x, y);
+      }
+    }
+  }
+
+  // Draw loading bar below text (only during generation)
+  if (step < totalSteps) {
+    const barFontSize = Math.max(12, h * 0.02);
+    ctx.font = `${barFontSize}px 'Courier New', monospace`;
+    ctx.textBaseline = 'top';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = `rgba(51, 255, 51, ${effectiveOpacity * 0.5})`;
+    ctx.shadowColor = `rgba(51, 255, 51, ${effectiveOpacity * 0.5})`;
+    ctx.shadowBlur = barFontSize * 0.25;
+
+    const barLength = 20;
+    const filled = Math.round((step / totalSteps) * barLength);
+    const empty = barLength - filled;
+    const barText = `LOADING... |${'▓'.repeat(filled)}${'░'.repeat(empty)}| ${step}/${totalSteps}`;
+
+    const barY = textStartY + totalTextHeight + 20;
+    ctx.fillText(barText, w / 2 + offset.x, barY + offset.y);
+  }
+}
+
+// ============================================================================
+// iOS CHECK
+// ============================================================================
+
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+
+if (isIOS) {
+  renderText('iOS is not supported. Please view on desktop or Android.');
+} else {
+  const script = document.createElement('script');
+  script.src = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.2/dist/ort.min.js';
+  script.onload = () => main();
+  document.head.appendChild(script);
+}
+
+// ============================================================================
+// UTILITIES
+// ============================================================================
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const nextFrame = () => new Promise(r => requestAnimationFrame(r));
+
+// ============================================================================
+// DIFFUSION STATE
+// ============================================================================
+
+const state = {
+  tokens: new Int32Array(MODEL.blockSize),
+  tokensBigInt: new BigInt64Array(MODEL.blockSize),
+  sigmaData: new Float32Array(1),
+  probBuffer: new Float64Array(MODEL.vocabSize)
+};
+
+// Initialize with random tokens
+for (let i = 0; i < MODEL.blockSize; i++) {
+  state.tokens[i] = Math.floor(Math.random() * MODEL.vocabSize);
+}
+
+// ============================================================================
+// SIGMA SCHEDULE
+// ============================================================================
+
+const logSigmaMin = Math.log(CONFIG.sigmaMin);
+const logSigmaMax = Math.log(CONFIG.sigmaMax);
+
+function getSigma(t) {
+  return Math.exp((1 - t) * logSigmaMin + t * logSigmaMax);
+}
+
+// ============================================================================
+// DECODE
+// ============================================================================
+
+function decode() {
+  let result = '';
+  for (let i = 0; i < state.tokens.length; i++) {
+    result += VOCAB.itos[state.tokens[i]] || '?';
+  }
+  return result;
+}
+
+// ============================================================================
+// DISCRETE DIFFUSION SAMPLING
+// ============================================================================
+
+function sampleTokens(logits, deltaSigma) {
+  const vocabSize = MODEL.vocabSize;
+  const seqLen = MODEL.blockSize;
+  const probBuffer = state.probBuffer;
+
+  const expNegDelta = Math.exp(-deltaSigma);
+  const invExpNegDelta = 1.0 / expNegDelta;
+  const transitionBase = (1 - expNegDelta) / vocabSize;
+  const transitionDiag = 1 - (vocabSize - 1) * transitionBase;
+  const correctionFactor = (expNegDelta - 1) / (vocabSize * expNegDelta);
+
+  for (let pos = 0; pos < seqLen; pos++) {
+    const offset = pos * vocabSize;
+    const currentToken = state.tokens[pos];
+
+    let maxLogit = -Infinity;
+    for (let v = 0; v < vocabSize; v++) {
+      if (logits[offset + v] > maxLogit) maxLogit = logits[offset + v];
+    }
+
+    let expSum = 0;
+    for (let v = 0; v < vocabSize; v++) {
+      expSum += Math.exp(logits[offset + v] - maxLogit);
+    }
+
+    const correction = correctionFactor * expSum;
+    let probSum = 0;
+
+    for (let v = 0; v < vocabSize; v++) {
+      const expLogit = Math.exp(logits[offset + v] - maxLogit);
+      const score = correction + expLogit * invExpNegDelta;
+      const transProb = (v === currentToken) ? transitionDiag : transitionBase;
+      const prob = Math.max(0, score * transProb);
+      probBuffer[v] = prob;
+      probSum += prob;
+    }
+
+    const rand = Math.random() * probSum;
+    let cumsum = 0;
+    let sampled = currentToken;
+
+    for (let v = 0; v < vocabSize; v++) {
+      cumsum += probBuffer[v];
+      if (rand <= cumsum) {
+        sampled = v;
+        break;
+      }
+    }
+
+    state.tokens[pos] = sampled;
+  }
+}
+
+// ============================================================================
+// MODEL INFERENCE
+// ============================================================================
+
+async function runInference(session, sigma) {
+  for (let i = 0; i < MODEL.blockSize; i++) {
+    state.tokensBigInt[i] = BigInt(state.tokens[i]);
+  }
+
+  state.sigmaData[0] = sigma;
+
+  const inputTensor = new ort.Tensor('int64', state.tokensBigInt, [1, MODEL.blockSize]);
+  const sigmaTensor = new ort.Tensor('float32', state.sigmaData, [1, 1]);
+
+  const results = await session.run({
+    'input_ids': inputTensor,
+    'sigma': sigmaTensor
+  });
+
+  const logits = await results.logits.getData();
+
+  for (const key in results) {
+    if (results[key]?.dispose) results[key].dispose();
+  }
+  inputTensor.dispose();
+  sigmaTensor.dispose();
+
+  return logits;
+}
+
+// ============================================================================
+// DIFFUSION LOOP
+// ============================================================================
+
+async function runDiffusion(session) {
+  const steps = CONFIG.steps;
+  const eps = 1e-5;
+  const stepSize = (1 - eps) / steps;
+
+  for (let i = 0; i < steps; i++) {
+    const t = 1 - (i + 1) * stepSize;
+    const sigma = getSigma(t);
+
+    const deltaSigma = (i < steps - 1)
+      ? sigma - getSigma(t - stepSize)
+      : sigma;
+
+    const logits = await runInference(session, sigma);
+    sampleTokens(logits, deltaSigma);
+
+    // Yield to animation frame so CRT effects keep running smoothly
+    await nextFrame();
+
+    // Track current and previous text for highlighting
+    const currentText = decode();
+    app.currentStep = i + 1;
+    renderConfession(currentText, app.currentStep, steps, app.previousText);
+    app.previousText = currentText;
+
+    await sleep(CONFIG.stepDelayMs);
+  }
+
+  // Final render without loading bar or highlighting
+  renderConfession(decode(), steps, steps);
+}
+
+// ============================================================================
+// MAIN
+// ============================================================================
+
+async function loadModel() {
+  const forceWasm = window.location.search.includes('wasm');
+
+  const webgpuOptions = {
+    executionProviders: [{ name: 'webgpu', preferredOutputLocation: 'cpu' }],
+    graphOptimizationLevel: 'all'
+  };
+
+  const wasmOptions = {
+    executionProviders: ['wasm'],
+    executionMode: 'sequential',
+    graphOptimizationLevel: 'basic'
+  };
+
+  let session;
+  let backend;
+
+  if (!forceWasm) {
+    try {
+      session = await ort.InferenceSession.create(CONFIG.modelUrl, webgpuOptions);
+      backend = 'webgpu';
+    } catch (e) {
+      console.log('WebGPU failed: ' + e.message);
+    }
+  }
+
+  if (!session) {
+    session = await ort.InferenceSession.create(CONFIG.modelUrl, wasmOptions);
+    backend = 'wasm';
+  }
+
+  console.log('Backend: ' + backend);
+  return session;
+}
+
+// Hold animation - keep rendering with effects during hold phase
+async function runHold() {
+  const startTime = performance.now();
+  const duration = CONFIG.timing.confessionHold;
+
+  return new Promise(resolve => {
+    function animate() {
+      const elapsed = performance.now() - startTime;
+
+      // Keep rendering so effects (flicker, jitter) continue
+      renderConfession(app.finalText, CONFIG.steps, CONFIG.steps, '');
+
+      if (elapsed < duration) {
+        requestAnimationFrame(animate);
+      } else {
+        resolve();
+      }
+    }
+    requestAnimationFrame(animate);
+  });
+}
+
+// Fade animation using requestAnimationFrame
+async function runFadeOut() {
+  const startTime = performance.now();
+  const duration = CONFIG.timing.confessionFade;
+
+  return new Promise(resolve => {
+    function animate() {
+      const elapsed = performance.now() - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      const opacity = 1 - progress;
+
+      renderConfession(app.finalText, CONFIG.steps, CONFIG.steps, '', opacity);
+
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        resolve();
+      }
+    }
+    requestAnimationFrame(animate);
+  });
+}
+
+// Continuous CRT render loop
+function startCRTLoop() {
+  function loop() {
+    renderCRT();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+}
+
+// Animated WE screen that updates each frame
+async function runWEScreen(duration) {
+  const startTime = performance.now();
+
+  return new Promise(resolve => {
+    function animate() {
+      const elapsed = performance.now() - startTime;
+      renderWE();
+
+      if (elapsed < duration) {
+        requestAnimationFrame(animate);
+      } else {
+        resolve();
+      }
+    }
+    requestAnimationFrame(animate);
+  });
+}
+
+async function main() {
+  // Initialize CRT post-processing
+  initCRT();
+  resize();
+
+  // Start CRT render loop
+  startCRTLoop();
+
+  // Show animated WE screen while loading
+  const loadPromise = loadModel();
+
+  // Run WE animation for at least weDuration, or until model loads (whichever is longer)
+  const wePromise = runWEScreen(CONFIG.timing.weDuration);
+
+  // Wait for both WE duration and model load
+  const [session] = await Promise.all([loadPromise, wePromise]);
+  app.session = session;
+
+  // Main generation loop
+  while (true) {
+    // Reset state for new generation
+    app.previousText = '';
+    for (let i = 0; i < MODEL.blockSize; i++) {
+      state.tokens[i] = Math.floor(Math.random() * MODEL.vocabSize);
+    }
+
+    // GENERATING
+    app.state = State.GENERATING;
+    await runDiffusion(app.session);
+    app.finalText = decode();
+
+    // HOLDING - continue rendering with effects
+    app.state = State.HOLDING;
+    await runHold();
+
+    // FADING
+    app.state = State.FADING;
+    await runFadeOut();
+  }
+}
+  </script>
+</body>
+</html>
