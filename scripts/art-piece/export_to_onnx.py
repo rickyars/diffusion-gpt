@@ -10,7 +10,6 @@ import sys
 import torch
 import pickle
 import json
-import base64
 
 # Add training directory to path for model imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'training'))
@@ -96,23 +95,22 @@ def export_model_to_onnx(model_path, output_path):
 
     return onnx_path, config
 
-def export_vocab(dataset_name):
+def export_vocab(vocab_path):
     """Export vocabulary to JSON format (loads from .pkl or .json)."""
 
-    # Try pkl first, then json
-    pkl_path = f'vocab/{dataset_name}_vocab.pkl'
-    json_path = f'vocab/{dataset_name}_vocab.json'
-
-    if os.path.exists(pkl_path):
-        print(f"\nLoading vocabulary from {pkl_path}...")
-        with open(pkl_path, 'rb') as f:
+    # Determine file type and output path
+    if vocab_path.endswith('.pkl'):
+        json_path = vocab_path.replace('.pkl', '.json')
+        print(f"\nLoading vocabulary from {vocab_path}...")
+        with open(vocab_path, 'rb') as f:
             vocab_meta = pickle.load(f)
-    elif os.path.exists(json_path):
-        print(f"\nLoading vocabulary from {json_path}...")
-        with open(json_path, 'r') as f:
+    elif vocab_path.endswith('.json'):
+        json_path = vocab_path
+        print(f"\nLoading vocabulary from {vocab_path}...")
+        with open(vocab_path, 'r') as f:
             vocab_meta = json.load(f)
     else:
-        raise FileNotFoundError(f"No vocabulary found at {pkl_path} or {json_path}")
+        raise ValueError(f"Vocabulary file must be .pkl or .json, got: {vocab_path}")
 
     vocab_data = {
         'itos': vocab_meta['itos'],
@@ -128,123 +126,6 @@ def export_vocab(dataset_name):
     print(f"Vocabulary exported to {json_path} ({json_size:.2f} KB)")
 
     return json_path, vocab_data
-
-def create_base64_embeddings():
-    """Create base64-encoded model and vocab for HTML embedding."""
-
-    # Export model to ONNX
-    model_path, config = export_model_to_onnx()
-
-    # Export vocabulary
-    vocab_path, vocab_data = export_vocab()
-
-    print("\n" + "="*60)
-    print("Creating base64 embeddings for HTML...")
-    print("="*60)
-
-    # Read and encode model
-    with open(model_path, 'rb') as f:
-        model_bytes = f.read()
-
-    model_base64 = base64.b64encode(model_bytes).decode('utf-8')
-    model_size_mb = len(model_bytes) / (1024 * 1024)
-
-    print(f"\nModel: {model_size_mb:.2f} MB")
-    print(f"Base64 encoded size: {len(model_base64) / (1024 * 1024):.2f} MB")
-
-    # Read and encode vocab
-    with open(vocab_path, 'r') as f:
-        vocab_json = f.read()
-
-    vocab_size_kb = len(vocab_json) / 1024
-    print(f"Vocabulary: {vocab_size_kb:.2f} KB")
-
-    # Create JavaScript snippet for embedding
-    js_snippet = f'''
-// ============================================================================
-// EMBEDDED MODEL AND VOCABULARY
-// ============================================================================
-
-// Model configuration
-const MODEL_CONFIG = {{
-    block_size: {config.block_size},
-    vocab_size: {config.vocab_size},
-    n_layer: {config.n_layer},
-    n_head: {config.n_head},
-    n_embd: {config.n_embd},
-    cond_dim: {config.cond_dim}
-}};
-
-// Vocabulary mapping
-const VOCAB = {vocab_json};
-
-// ONNX model as base64
-// Size: {model_size_mb:.2f} MB
-// Note: In production, split this into chunks if needed
-const MODEL_BASE64 = '{model_base64[:100]}...'; // Truncated for display
-
-// Full model data (uncomment for production):
-// const MODEL_BASE64 = '{model_base64}';
-
-// Helper function to decode base64 to Uint8Array
-function base64ToUint8Array(base64) {{
-    const binaryString = atob(base64);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {{
-        bytes[i] = binaryString.charCodeAt(i);
-    }}
-    return bytes;
-}}
-
-// Load model when needed
-async function loadModel() {{
-    const modelBytes = base64ToUint8Array(MODEL_BASE64);
-    // Will be used by ONNX Runtime Web
-    return modelBytes;
-}}
-'''
-
-    # Save the snippet
-    output_path = 'model_embedding.js'
-    with open(output_path, 'w') as f:
-        f.write(js_snippet)
-
-    print(f"\nJavaScript embedding saved to {output_path}")
-
-    # Also save the full base64 to a separate file
-    full_base64_path = 'models/model_base64.txt'
-    with open(full_base64_path, 'w') as f:
-        f.write(model_base64)
-
-    print(f"Full base64 saved to {full_base64_path}")
-
-    # Calculate total HTML size estimate
-    total_size = model_size_mb + (vocab_size_kb / 1024)
-    print("\n" + "="*60)
-    print("SIZE ESTIMATES FOR HTML FILE")
-    print("="*60)
-    print(f"Model (FP32):                {model_size_mb:.2f} MB")
-    print(f"Vocabulary:                  {vocab_size_kb:.2f} KB")
-    print(f"ONNX Runtime Web (~2.5MB):   2.50 MB")
-    print(f"JavaScript code (~50KB):     0.05 MB")
-    print(f"Shaders & Audio (~20KB):     0.02 MB")
-    print(f"Font embedded (~15KB):       0.01 MB")
-    print("-" * 60)
-    print(f"TOTAL ESTIMATED SIZE:        {total_size + 2.58:.2f} MB")
-    print("="*60)
-
-    if total_size + 2.58 < 100:
-        print("[OK] Well within 100MB budget!")
-    else:
-        print("[WARNING] Exceeds 100MB, may need further optimization")
-
-    return {
-        'model_path': model_path,
-        'model_base64_path': full_base64_path,
-        'vocab_path': vocab_path,
-        'config': config,
-        'vocab_data': vocab_data
-    }
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
@@ -279,13 +160,16 @@ if __name__ == '__main__':
     print(f"Output: {args.output}")
     print("="*60)
 
-    # Export model to ONNX (output will be {output}_quantized.onnx if quantization succeeds)
+    # Export model to ONNX
     final_model_path, config = export_model_to_onnx(args.model, args.output)
+
+    # Export vocabulary to JSON
+    vocab_json_path, vocab_data = export_vocab(args.vocab)
 
     print("\n" + "="*60)
     print("EXPORT COMPLETE!")
     print("="*60)
     print(f"ONNX model: {final_model_path}")
-    print(f"Vocabulary: {args.vocab}")
+    print(f"Vocabulary: {vocab_json_path}")
     print("\nNext: Run update_model.py to generate we.html")
-    print(f"  python scripts/art-piece/update_model.py --model {final_model_path} --vocab {args.vocab}")
+    print(f"  python scripts/art-piece/update_model.py --model {final_model_path} --vocab {vocab_json_path}")
