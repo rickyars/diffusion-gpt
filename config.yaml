@@ -41,12 +41,12 @@ model:
 # =============================================================================
 training:
   # Basic training parameters
-  epochs: 50                  # Number of training epochs (25-50 usually sufficient)
+  epochs: 100                  # Number of training epochs (25-50 usually sufficient)
   batch_size: 352             # Batch size (reduce if OOM, increase if memory allows)
   learning_rate: 0.0001       # Initial learning rate
 
   # Learning rate schedule
-  warmup_steps: 1000          # Steps for linear LR warmup (0 to disable)
+  warmup_ratio: 0.05          # Fraction of total steps for linear LR warmup (0 to disable)
   min_lr_ratio: 0.1           # Min LR as fraction of initial LR (cosine annealing)
 
   # Validation and logging

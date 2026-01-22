@@ -17,7 +17,7 @@ import torch.optim as optim
 import yaml
 
 from dataset_loader import get_data_loader
-from model import GPT, GPTConfig, GPTQuantized
+from model import GPT, GPTConfig
 from utils import GeometricNoise, perturb_batch, set_seed
 
 # Configure Triton and torch inductor cache to use shorter paths on Windows
@@ -336,11 +336,12 @@ def train_model(
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, fused=use_fused_adamw)
 
     # Initialize learning rate scheduler
-    warmup_steps = config['training'].get('warmup_steps', 1000)
+    warmup_ratio = config['training'].get('warmup_ratio', 0.0)
     min_lr_ratio = config['training'].get('min_lr_ratio', 0.1)
     total_steps = len(train_loader) * epochs
+    warmup_steps = int(warmup_ratio * total_steps)
 
-    # Create scheduler (supports disabling by setting warmup_steps=0)
+    # Create scheduler (supports disabling by setting warmup_ratio=0)
     if warmup_steps > 0:
         scheduler = get_warmup_cosine_schedule(optimizer, warmup_steps, total_steps, min_lr_ratio)
     else:
@@ -390,7 +391,7 @@ def train_model(
     print(f"  AdamW mode:              {'fused' if use_fused_adamw else 'standard'}")
     print(f"  LR schedule:             {'warmup + cosine' if scheduler is not None else 'constant'}")
     if scheduler is not None:
-        print(f"    Warmup steps:          {warmup_steps}")
+        print(f"    Warmup ratio:          {warmup_ratio:.1%} ({warmup_steps} steps)")
         print(f"    Min LR ratio:          {min_lr_ratio}")
     print(f"Computation:")
     print(f"  torch.compile:           {'enabled' if use_compile else 'disabled'}")
