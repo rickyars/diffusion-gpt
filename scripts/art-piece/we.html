@@ -1006,6 +1006,51 @@ async function loadModel() {
   return session;
 }
 
+// Crash screen - shown when generation fails (e.g., iOS memory limits)
+function renderCrash() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const time = performance.now() / 1000;
+
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, w, h);
+
+  const flicker = calcFlicker(time);
+  const offset = calcGlitchOffset(w, h);
+
+  ctx.font = `${h * 0.03}px 'Courier New', monospace`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = `rgba(51, 255, 51, ${flicker})`;
+  ctx.shadowColor = `rgba(51, 255, 51, ${flicker})`;
+  ctx.shadowBlur = 10;
+
+  const lines = [
+    'SYSTEM FAULT',
+    '',
+    'Memory limit exceeded',
+    'The machine remembers too much',
+    '',
+    '[ END OF TRANSMISSION ]'
+  ];
+
+  const lineHeight = h * 0.05;
+  const startY = h / 2 - (lines.length * lineHeight) / 2;
+
+  for (let i = 0; i < lines.length; i++) {
+    ctx.fillText(lines[i], w / 2 + offset.x, startY + i * lineHeight + offset.y);
+  }
+}
+
+function startCrashLoop() {
+  function loop() {
+    renderCrash();
+    renderCRT();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+}
+
 // Hold animation - keep rendering with effects during hold phase
 async function runHold() {
   const startTime = performance.now();
@@ -1098,25 +1143,30 @@ async function main() {
   app.session = session;
 
   // Main generation loop
-  while (true) {
-    // Reset state for new generation
-    app.previousText = '';
-    for (let i = 0; i < MODEL.blockSize; i++) {
-      state.tokens[i] = Math.floor(Math.random() * MODEL.vocabSize);
+  try {
+    while (true) {
+      // Reset state for new generation
+      app.previousText = '';
+      for (let i = 0; i < MODEL.blockSize; i++) {
+        state.tokens[i] = Math.floor(Math.random() * MODEL.vocabSize);
+      }
+
+      // GENERATING
+      app.state = State.GENERATING;
+      await runDiffusion(app.session);
+      app.finalText = decode();
+
+      // HOLDING - continue rendering with effects
+      app.state = State.HOLDING;
+      await runHold();
+
+      // FADING
+      app.state = State.FADING;
+      await runFadeOut();
     }
-
-    // GENERATING
-    app.state = State.GENERATING;
-    await runDiffusion(app.session);
-    app.finalText = decode();
-
-    // HOLDING - continue rendering with effects
-    app.state = State.HOLDING;
-    await runHold();
-
-    // FADING
-    app.state = State.FADING;
-    await runFadeOut();
+  } catch (e) {
+    console.error('Generation failed:', e);
+    startCrashLoop();
   }
 }
   </script>
