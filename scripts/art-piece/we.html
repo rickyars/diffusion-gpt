@@ -50,15 +50,15 @@ const CONFIG = {
   // Timing (ms)
   timing: {
     weDuration: 2000,
-    confessionHold: 4000,
-    confessionFade: 2000
+    confessionHold: 6000,
+    confessionFade: 3000
   },
 
   // Effects
   effects: {
     flickerIntensity: 0.5,
     flickerSpeed: 8.0,
-    glitchIntensity: 0.003,
+    glitchIntensity: 0.002,
     rgbSplitChance: 0.05,
     rgbSplitOffset: 2
   }
@@ -304,9 +304,9 @@ void main() {
 
   // Horizontal sync glitch
   float line = floor(distorted.y * 20.0);
-  float r = random(vec2(line, floor(uTime * 2.0)));
+  float r = random(vec2(line, floor(uTime * 5.0)));
   if (r > 0.97) {
-    distorted.x += sin(uTime * 30.0 + line) * 0.01;
+    distorted.x += sin(uTime * 50.0 + line) * 0.005;
   }
 
   // Chromatic aberration
@@ -951,16 +951,27 @@ async function runDiffusion(session) {
     const logits = await runInference(session, sigma);
     sampleTokens(logits, deltaSigma);
 
-    // Yield to animation frame so CRT effects keep running smoothly
-    await nextFrame();
-
     // Track current and previous text for highlighting
     const currentText = decode();
     app.currentStep = i + 1;
-    renderConfession(currentText, app.currentStep, steps, app.previousText);
-    app.previousText = currentText;
+    const prevText = app.previousText;
 
-    await sleep(CONFIG.stepDelayMs);
+    // Animate step for stepDelayMs with continuous effects
+    const stepStartTime = performance.now();
+    await new Promise(resolve => {
+      function animateStep() {
+        renderConfession(currentText, app.currentStep, steps, prevText);
+        const elapsed = performance.now() - stepStartTime;
+        if (elapsed < CONFIG.stepDelayMs) {
+          requestAnimationFrame(animateStep);
+        } else {
+          resolve();
+        }
+      }
+      requestAnimationFrame(animateStep);
+    });
+
+    app.previousText = currentText;
   }
 
   // Final render without loading bar or highlighting
