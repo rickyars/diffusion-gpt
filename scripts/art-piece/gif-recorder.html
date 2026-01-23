@@ -3,15 +3,66 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WE</title>
+  <title>WE Confessions - GIF Recorder</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body, html {
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-      background: #000;
+    body {
+      background: #111;
+      color: #33ff33;
       font-family: 'Courier New', monospace;
+      padding: 20px;
+    }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 15px;
+      margin-bottom: 20px;
+      align-items: flex-end;
+    }
+    .control-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    label {
+      font-size: 12px;
+      opacity: 0.7;
+    }
+    input, select, button {
+      background: #222;
+      border: 1px solid #33ff33;
+      color: #33ff33;
+      padding: 8px 12px;
+      font-family: inherit;
+      font-size: 14px;
+    }
+    input:focus, select:focus {
+      outline: none;
+      border-color: #66ff66;
+    }
+    button {
+      cursor: pointer;
+      min-width: 100px;
+    }
+    button:hover:not(:disabled) {
+      background: #33ff33;
+      color: #000;
+    }
+    button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    #status {
+      padding: 10px;
+      background: #1a1a1a;
+      border: 1px solid #333;
+      margin-bottom: 20px;
+      min-height: 40px;
+    }
+    #canvasContainer {
+      position: relative;
+      display: inline-block;
+      border: 1px solid #333;
     }
     #textCanvas {
       position: absolute;
@@ -20,41 +71,61 @@
       visibility: hidden;
     }
     #crtCanvas {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
+      display: block;
     }
   </style>
 </head>
 <body>
-  <canvas id="textCanvas"></canvas>
-  <canvas id="crtCanvas"></canvas>
+  <h1 style="margin-bottom: 20px;">WE Confessions - GIF Recorder</h1>
 
-  <script>
+  <div class="controls">
+    <div class="control-group">
+      <label>Canvas Size</label>
+      <select id="sizeSelect">
+        <option value="512">512x512</option>
+        <option value="768" selected>768x768</option>
+        <option value="1024">1024x1024</option>
+      </select>
+    </div>
+    <div class="control-group">
+      <label>FPS</label>
+      <input type="number" id="fpsInput" value="10" min="5" max="30" style="width: 60px;">
+    </div>
+    <div class="control-group">
+      <label>Hold (ms)</label>
+      <input type="number" id="holdInput" value="2000" min="500" max="10000" step="100" style="width: 80px;">
+    </div>
+    <div class="control-group">
+      <label>Fade (ms)</label>
+      <input type="number" id="fadeInput" value="1500" min="500" max="5000" step="100" style="width: 80px;">
+    </div>
+    <button id="recordBtn" disabled>Record</button>
+    <button id="downloadBtn" disabled>Download</button>
+  </div>
+
+  <div id="status">Loading model...</div>
+
+  <div id="canvasContainer">
+    <canvas id="textCanvas"></canvas>
+    <canvas id="crtCanvas"></canvas>
+  </div>
+
+  <script type="module">
 'use strict';
 
+// gifenc from CDN
+import { GIFEncoder, quantize, applyPalette } from 'https://cdn.jsdelivr.net/npm/gifenc@1.0.3/dist/gifenc.esm.js';
+
 // ============================================================================
-// CONFIG - All timing and effect values parameterized
+// CONFIG
 // ============================================================================
 
 const CONFIG = {
-  // Inference
   steps: 64,
   stepDelayMs: 100,
   modelUrl: 'https://arweave.net/3bFxDJBr_SPIKTm5dRIOhObYjSQAIrtGDAbSughwiFY',
   sigmaMin: 1e-4,
   sigmaMax: 20.0,
-
-  // Timing (ms)
-  timing: {
-    weDuration: 2000,
-    confessionHold: 6000,
-    confessionFade: 3000
-  },
-
-  // Effects
   effects: {
     flickerIntensity: 0.5,
     flickerSpeed: 8.0,
@@ -78,115 +149,52 @@ const TEXT_GRID = {
 const VOCAB = {"stoi": {"\n": 0, " ": 1, "!": 2, "\"": 3, "#": 4, "$": 5, "%": 6, "&": 7, "'": 8, "(": 9, ")": 10, "*": 11, "+": 12, ",": 13, "-": 14, ".": 15, "/": 16, "0": 17, "1": 18, "2": 19, "3": 20, "4": 21, "5": 22, "6": 23, "7": 24, "8": 25, "9": 26, ":": 27, ";": 28, "=": 29, "?": 30, "A": 31, "B": 32, "C": 33, "D": 34, "E": 35, "F": 36, "G": 37, "H": 38, "I": 39, "J": 40, "K": 41, "L": 42, "M": 43, "N": 44, "O": 45, "P": 46, "Q": 47, "R": 48, "S": 49, "T": 50, "U": 51, "V": 52, "W": 53, "X": 54, "Y": 55, "Z": 56, "[": 57, "\\": 58, "]": 59, "_": 60, "a": 61, "b": 62, "c": 63, "d": 64, "e": 65, "f": 66, "g": 67, "h": 68, "i": 69, "j": 70, "k": 71, "l": 72, "m": 73, "n": 74, "o": 75, "p": 76, "q": 77, "r": 78, "s": 79, "t": 80, "u": 81, "v": 82, "w": 83, "x": 84, "y": 85, "z": 86, "~": 87, "\u00a0": 88, "\u00a3": 89, "\u00e9": 90, "\u2013": 91, "\u2014": 92, "\u2018": 93, "\u2019": 94, "\u201c": 95, "\u201d": 96, "\u2026": 97, "\ufe0f": 98, "\ud83d\ude2d": 99}, "itos": {"0": "\n", "1": " ", "2": "!", "3": "\"", "4": "#", "5": "$", "6": "%", "7": "&", "8": "'", "9": "(", "10": ")", "11": "*", "12": "+", "13": ",", "14": "-", "15": ".", "16": "/", "17": "0", "18": "1", "19": "2", "20": "3", "21": "4", "22": "5", "23": "6", "24": "7", "25": "8", "26": "9", "27": ":", "28": ";", "29": "=", "30": "?", "31": "A", "32": "B", "33": "C", "34": "D", "35": "E", "36": "F", "37": "G", "38": "H", "39": "I", "40": "J", "41": "K", "42": "L", "43": "M", "44": "N", "45": "O", "46": "P", "47": "Q", "48": "R", "49": "S", "50": "T", "51": "U", "52": "V", "53": "W", "54": "X", "55": "Y", "56": "Z", "57": "[", "58": "\\", "59": "]", "60": "_", "61": "a", "62": "b", "63": "c", "64": "d", "65": "e", "66": "f", "67": "g", "68": "h", "69": "i", "70": "j", "71": "k", "72": "l", "73": "m", "74": "n", "75": "o", "76": "p", "77": "q", "78": "r", "79": "s", "80": "t", "81": "u", "82": "v", "83": "w", "84": "x", "85": "y", "86": "z", "87": "~", "88": "\u00a0", "89": "\u00a3", "90": "\u00e9", "91": "\u2013", "92": "\u2014", "93": "\u2018", "94": "\u2019", "95": "\u201c", "96": "\u201d", "97": "\u2026", "98": "\ufe0f", "99": "\ud83d\ude2d"}};
 
 // ============================================================================
+// UI ELEMENTS
+// ============================================================================
+
+const sizeSelect = document.getElementById('sizeSelect');
+const fpsInput = document.getElementById('fpsInput');
+const holdInput = document.getElementById('holdInput');
+const fadeInput = document.getElementById('fadeInput');
+const recordBtn = document.getElementById('recordBtn');
+const downloadBtn = document.getElementById('downloadBtn');
+const statusEl = document.getElementById('status');
+
+// ============================================================================
 // CANVAS SETUP
 // ============================================================================
 
 const canvas = document.getElementById('textCanvas');
 const ctx = canvas.getContext('2d');
-
-function resize() {
-  const dpr = Math.min(window.devicePixelRatio || 1, 2.0);
-
-  canvas.width = window.innerWidth * dpr;
-  canvas.height = window.innerHeight * dpr;
-  canvas.style.width = window.innerWidth + 'px';
-  canvas.style.height = window.innerHeight + 'px';
-
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-  resizeCRT();
-}
-window.addEventListener('resize', resize);
-// Note: resize() called after CRT init
-
-// ============================================================================
-// STATE MACHINE
-// ============================================================================
-
-const State = {
-  WE: 'WE',
-  GENERATING: 'GENERATING',
-  HOLDING: 'HOLDING',
-  FADING: 'FADING'
-};
-
-const app = {
-  state: State.WE,
-  stateStart: 0,
-  session: null,
-  currentStep: 0,
-  previousText: '',
-  finalText: ''
-};
-
-// ============================================================================
-// 2D CANVAS EFFECTS
-// ============================================================================
-
-function calcFlicker(time) {
-  const speed = CONFIG.effects.flickerSpeed;
-  const intensity = CONFIG.effects.flickerIntensity;
-
-  // Multi-frequency flicker for organic CRT feel
-  let flicker = Math.sin(time * speed) * 0.4 +
-                Math.sin(time * speed * 1.7) * 0.3 +
-                Math.sin(time * speed * 3.1) * 0.2 +
-                Math.sin(time * speed * 7.3) * 0.1;
-
-  // Normalize to 0-1 range then scale by intensity
-  flicker = (flicker + 1.0) * 0.5;
-  flicker = 1.0 - (intensity * (1.0 - flicker));
-
-  // Occasional random brightness dips
-  if (Math.random() < 0.01) {
-    flicker *= 0.85 + Math.random() * 0.1;
-  }
-
-  return flicker;
-}
-
-function calcGlitchOffset(w, h) {
-  const intensity = CONFIG.effects.glitchIntensity;
-  return {
-    x: (Math.random() - 0.5) * intensity * w,
-    y: (Math.random() - 0.5) * intensity * h
-  };
-}
-
-function shouldRGBSplit() {
-  return Math.random() < CONFIG.effects.rgbSplitChance;
-}
-
-function drawWithEffects(drawFn, w, h) {
-  const time = performance.now() / 1000;
-  const flicker = calcFlicker(time);
-  const offset = calcGlitchOffset(w, h);
-  const doRGBSplit = shouldRGBSplit();
-
-  // RGB split (draw red and blue channels offset)
-  if (doRGBSplit) {
-    const rgbOffset = CONFIG.effects.rgbSplitOffset;
-    ctx.globalAlpha = 0.3;
-
-    ctx.fillStyle = 'rgb(255, 0, 0)';
-    drawFn(offset.x - rgbOffset, offset.y);
-
-    ctx.fillStyle = 'rgb(0, 0, 255)';
-    drawFn(offset.x + rgbOffset, offset.y);
-
-    ctx.globalAlpha = 1.0;
-  }
-
-  return { flicker, offset };
-}
-
-// ============================================================================
-// WEBGL CRT POST-PROCESSING WITH BLOOM
-// ============================================================================
-
 const crtCanvas = document.getElementById('crtCanvas');
 
-// WebGL state
+let canvasSize = 768;
+
+function resizeCanvas(size) {
+  canvasSize = size;
+  canvas.width = size;
+  canvas.height = size;
+  canvas.style.width = size + 'px';
+  canvas.style.height = size + 'px';
+  crtCanvas.width = size;
+  crtCanvas.height = size;
+  crtCanvas.style.width = size + 'px';
+  crtCanvas.style.height = size + 'px';
+
+  if (webgl.gl) {
+    webgl.gl.viewport(0, 0, size, size);
+    setupBloomBuffers();
+  }
+}
+
+sizeSelect.addEventListener('change', () => {
+  resizeCanvas(parseInt(sizeSelect.value));
+});
+
+// ============================================================================
+// WEBGL CRT POST-PROCESSING
+// ============================================================================
+
 const webgl = {
   gl: null,
   vao: null,
@@ -197,7 +205,6 @@ const webgl = {
   bloomSize: { width: 0, height: 0 }
 };
 
-// Shared vertex shader (fullscreen quad)
 const VERTEX_SHADER = `#version 300 es
 in vec2 aPosition;
 out vec2 vUV;
@@ -206,7 +213,6 @@ void main() {
   gl_Position = vec4(aPosition, 0.0, 1.0);
 }`;
 
-// Bright pass: extract glowing pixels for bloom
 const BRIGHT_PASS_SHADER = `#version 300 es
 precision highp float;
 in vec2 vUV;
@@ -222,7 +228,6 @@ void main() {
   fragColor = vec4(color.rgb * intensity * 2.0, 1.0);
 }`;
 
-// Gaussian blur (separable, 9-tap)
 const BLUR_SHADER = `#version 300 es
 precision highp float;
 in vec2 vUV;
@@ -246,7 +251,6 @@ void main() {
   fragColor = sum;
 }`;
 
-// Final CRT composite with bloom
 const CRT_SHADER = `#version 300 es
 precision highp float;
 in vec2 vUV;
@@ -297,19 +301,16 @@ vec3 phosphorGlow(vec3 color, vec3 bloom) {
 void main() {
   vec2 uv = vUV;
 
-  // Barrel distortion
   vec2 scaled = (uv - 0.5) * 0.92 + 0.5;
   vec2 distorted = barrel(scaled, 0.25);
   distorted = clamp(distorted, 0.0, 1.0);
 
-  // Horizontal sync glitch
   float line = floor(distorted.y * 20.0);
   float r = random(vec2(line, floor(uTime * 5.0)));
   if (r > 0.97) {
     distorted.x += sin(uTime * 50.0 + line) * 0.005;
   }
 
-  // Chromatic aberration
   vec2 center = distorted - 0.5;
   float dist = length(center);
   vec2 dir = normalize(center + 0.0001);
@@ -323,30 +324,23 @@ void main() {
   float blu = texture(uTexture, uvFlipped - dirFlipped * amt).b;
   vec3 color = vec3(red, grn, blu);
 
-  // Bloom / phosphor glow
   vec3 bloom = texture(uBloom, distorted).rgb;
   color = phosphorGlow(color, bloom);
-
-  // Scanlines
   color = scanlines(color, distorted);
 
-  // Vignette
   vec2 vc = (uv - 0.5) * 2.0;
   float vignette = 1.0 - smoothstep(0.5, 1.5, length(vc));
   color *= vignette;
 
-  // Noise
   float n = noise(uv, uTime) * 0.15;
   color += n - 0.075;
 
-  // Multi-frequency flicker (more organic)
   float flicker = sin(uTime * 2.3) * 0.015 +
                   sin(uTime * 5.7) * 0.008 +
                   sin(uTime * 11.3) * 0.004 +
                   sin(uTime * 23.1) * 0.002;
   color *= (1.0 + flicker);
 
-  // Background glow on dark areas
   float dark = 1.0 - dot(color, vec3(0.333));
   float staticNoise = noise(uv * 3.0, uTime * 2.0) * noise(uv * 5.0, uTime * 1.5);
   color += vec3(0.0, 0.02, 0.01) * staticNoise * dark * 0.5;
@@ -403,16 +397,13 @@ function createFramebuffer(gl, texture) {
 }
 
 function initCRT() {
-  const gl = crtCanvas.getContext('webgl2', { alpha: false, antialias: false });
+  const gl = crtCanvas.getContext('webgl2', { alpha: false, antialias: false, preserveDrawingBuffer: true });
   if (!gl) {
     console.warn('WebGL2 not available');
-    crtCanvas.style.display = 'none';
-    canvas.style.visibility = 'visible';
     return false;
   }
   webgl.gl = gl;
 
-  // Create programs
   webgl.programs.bright = createProgram(gl, VERTEX_SHADER, BRIGHT_PASS_SHADER);
   webgl.programs.blur = createProgram(gl, VERTEX_SHADER, BLUR_SHADER);
   webgl.programs.crt = createProgram(gl, VERTEX_SHADER, CRT_SHADER);
@@ -421,7 +412,6 @@ function initCRT() {
     return false;
   }
 
-  // Cache uniform locations
   webgl.uniforms.bright = {
     uTexture: gl.getUniformLocation(webgl.programs.bright, 'uTexture')
   };
@@ -437,7 +427,6 @@ function initCRT() {
     uTime: gl.getUniformLocation(webgl.programs.crt, 'uTime')
   };
 
-  // Fullscreen quad VAO
   const verts = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
   const vbo = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
@@ -449,7 +438,6 @@ function initCRT() {
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
   gl.bindVertexArray(null);
 
-  // Source texture (from 2D canvas)
   webgl.textures.source = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, webgl.textures.source);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -464,65 +452,44 @@ function setupBloomBuffers() {
   const gl = webgl.gl;
   if (!gl) return;
 
-  // Bloom at 1/4 resolution for performance
-  const w = Math.floor(crtCanvas.width / 4);
-  const h = Math.floor(crtCanvas.height / 4);
+  const w = Math.floor(canvasSize / 4);
+  const h = Math.floor(canvasSize / 4);
 
   if (w === webgl.bloomSize.width && h === webgl.bloomSize.height) return;
   webgl.bloomSize = { width: w, height: h };
 
-  // Delete old textures/framebuffers if they exist
   if (webgl.textures.bloom) gl.deleteTexture(webgl.textures.bloom);
   if (webgl.textures.blur) gl.deleteTexture(webgl.textures.blur);
   if (webgl.framebuffers.bloom) gl.deleteFramebuffer(webgl.framebuffers.bloom);
   if (webgl.framebuffers.blur) gl.deleteFramebuffer(webgl.framebuffers.blur);
 
-  // Create bloom textures and framebuffers
   webgl.textures.bloom = createTexture(gl, w, h);
   webgl.textures.blur = createTexture(gl, w, h);
   webgl.framebuffers.bloom = createFramebuffer(gl, webgl.textures.bloom);
   webgl.framebuffers.blur = createFramebuffer(gl, webgl.textures.blur);
 }
 
-function resizeCRT() {
-  const dpr = Math.min(window.devicePixelRatio || 1, 2.0);
-
-  crtCanvas.width = window.innerWidth * dpr;
-  crtCanvas.height = window.innerHeight * dpr;
-  crtCanvas.style.width = window.innerWidth + 'px';
-  crtCanvas.style.height = window.innerHeight + 'px';
-
-  if (webgl.gl) {
-    webgl.gl.viewport(0, 0, crtCanvas.width, crtCanvas.height);
-    setupBloomBuffers();
-  }
-}
-
-function renderCRT() {
+function renderCRT(time) {
   const gl = webgl.gl;
   if (!gl) return;
 
-  const time = performance.now() / 1000;
-  const w = crtCanvas.width;
-  const h = crtCanvas.height;
+  const w = canvasSize;
+  const h = canvasSize;
   const bw = webgl.bloomSize.width;
   const bh = webgl.bloomSize.height;
 
   gl.bindVertexArray(webgl.vao);
 
-  // Upload source canvas
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, webgl.textures.source);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
 
-  // Pass 1: Bright pass → bloom FBO
   gl.bindFramebuffer(gl.FRAMEBUFFER, webgl.framebuffers.bloom);
   gl.viewport(0, 0, bw, bh);
   gl.useProgram(webgl.programs.bright);
   gl.uniform1i(webgl.uniforms.bright.uTexture, 0);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-  // Pass 2: Horizontal blur → blur FBO
   gl.bindFramebuffer(gl.FRAMEBUFFER, webgl.framebuffers.blur);
   gl.useProgram(webgl.programs.blur);
   gl.activeTexture(gl.TEXTURE0);
@@ -532,13 +499,11 @@ function renderCRT() {
   gl.uniform2f(webgl.uniforms.blur.uResolution, bw, bh);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-  // Pass 3: Vertical blur → bloom FBO
   gl.bindFramebuffer(gl.FRAMEBUFFER, webgl.framebuffers.bloom);
   gl.bindTexture(gl.TEXTURE_2D, webgl.textures.blur);
   gl.uniform2f(webgl.uniforms.blur.uDirection, 0.0, 1.0);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-  // Pass 4: Final CRT composite → screen
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   gl.viewport(0, 0, w, h);
   gl.useProgram(webgl.programs.crt);
@@ -558,88 +523,42 @@ function renderCRT() {
 }
 
 // ============================================================================
+// 2D CANVAS EFFECTS
+// ============================================================================
+
+function calcFlicker(time) {
+  const speed = CONFIG.effects.flickerSpeed;
+  const intensity = CONFIG.effects.flickerIntensity;
+
+  let flicker = Math.sin(time * speed) * 0.4 +
+                Math.sin(time * speed * 1.7) * 0.3 +
+                Math.sin(time * speed * 3.1) * 0.2 +
+                Math.sin(time * speed * 7.3) * 0.1;
+
+  flicker = (flicker + 1.0) * 0.5;
+  flicker = 1.0 - (intensity * (1.0 - flicker));
+
+  if (Math.random() < 0.01) {
+    flicker *= 0.85 + Math.random() * 0.1;
+  }
+
+  return flicker;
+}
+
+function calcGlitchOffset(w, h) {
+  const intensity = CONFIG.effects.glitchIntensity;
+  return {
+    x: (Math.random() - 0.5) * intensity * w,
+    y: (Math.random() - 0.5) * intensity * h
+  };
+}
+
+function shouldRGBSplit() {
+  return Math.random() < CONFIG.effects.rgbSplitChance;
+}
+
+// ============================================================================
 // TEXT RENDERING
-// ============================================================================
-
-function renderText(text) {
-  const w = window.innerWidth;
-  const h = window.innerHeight;
-
-  // Clear
-  ctx.fillStyle = '#000';
-  ctx.fillRect(0, 0, w, h);
-
-  // Pad/truncate text to grid size
-  const paddedText = text.padEnd(TEXT_GRID.total, ' ').substring(0, TEXT_GRID.total);
-
-  // Calculate font size based on screen
-  const fontSize = Math.max(16, h * 0.028);
-  ctx.font = `${fontSize}px 'Courier New', monospace`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#33ff33';
-  ctx.shadowColor = '#33ff33';
-  ctx.shadowBlur = fontSize * 0.25;
-
-  // Layout
-  const lineHeight = fontSize * 1.5;
-  const totalHeight = TEXT_GRID.rows * lineHeight;
-  const startY = (h - totalHeight) / 2;
-
-  // Draw each line
-  for (let row = 0; row < TEXT_GRID.rows; row++) {
-    const line = paddedText.substring(row * TEXT_GRID.cols, (row + 1) * TEXT_GRID.cols);
-    const y = startY + row * lineHeight + lineHeight / 2;
-    ctx.fillText(line, w / 2, y);
-  }
-}
-
-// ============================================================================
-// WE INTRO SCREEN
-// ============================================================================
-
-function renderWE() {
-  const w = window.innerWidth;
-  const h = window.innerHeight;
-  const time = performance.now() / 1000;
-
-  // Clear
-  ctx.fillStyle = '#000';
-  ctx.fillRect(0, 0, w, h);
-
-  // Large centered WE text
-  const fontSize = h * 0.2;
-  ctx.font = `900 ${fontSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.shadowBlur = fontSize * 0.3;
-
-  // Apply effects
-  const flicker = calcFlicker(time);
-  const offset = calcGlitchOffset(w, h);
-  const doRGBSplit = shouldRGBSplit();
-
-  // RGB split
-  if (doRGBSplit) {
-    const rgbOffset = CONFIG.effects.rgbSplitOffset;
-    ctx.shadowColor = 'transparent';
-
-    ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
-    ctx.fillText('WE', w / 2 + offset.x - rgbOffset, h / 2 + offset.y);
-
-    ctx.fillStyle = 'rgba(0, 0, 255, 0.3)';
-    ctx.fillText('WE', w / 2 + offset.x + rgbOffset, h / 2 + offset.y);
-  }
-
-  // Main green text with flicker
-  const alpha = flicker;
-  ctx.fillStyle = `rgba(51, 255, 51, ${alpha})`;
-  ctx.shadowColor = `rgba(51, 255, 51, ${alpha})`;
-  ctx.fillText('WE', w / 2 + offset.x, h / 2 + offset.y);
-}
-
-// ============================================================================
-// ANSI HEADER + LOADING BAR
 // ============================================================================
 
 const HEADER_LINES = [
@@ -657,36 +576,29 @@ const HEADER_LINES = [
   '      -▀▀▀▀▀▀¬                                                                   `',
 ];
 
-function renderConfession(text, step, totalSteps, prevText = '', opacity = 1.0) {
-  const w = window.innerWidth;
-  const h = window.innerHeight;
-  const time = performance.now() / 1000;
+function renderConfession(text, step, totalSteps, prevText = '', opacity = 1.0, time) {
+  const w = canvasSize;
+  const h = canvasSize;
 
-  // Clear
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, w, h);
 
-  // Apply effects
   const flicker = calcFlicker(time);
   const offset = calcGlitchOffset(w, h);
   const doRGBSplit = shouldRGBSplit();
   const effectiveOpacity = opacity * flicker;
 
-  // Calculate font size based on screen
-  const fontSize = Math.max(16, h * 0.028);
+  const fontSize = Math.max(16, h * 0.042);
   ctx.fillStyle = `rgba(51, 255, 51, ${effectiveOpacity})`;
   ctx.shadowColor = `rgba(51, 255, 51, ${effectiveOpacity})`;
   ctx.shadowBlur = fontSize * 0.25;
 
-  // Layout for confession text
   const lineHeight = fontSize * 1.5;
   const totalTextHeight = TEXT_GRID.rows * lineHeight;
   const textStartY = (h - totalTextHeight) / 2;
-  const charWidth = fontSize * 0.6; // Monospace ratio
+  const charWidth = fontSize * 0.6;
 
-  // Helper to draw all content at given offset
   function drawAllContent(ox, oy) {
-    // Draw header above text (fixed sizes to match original)
     const headerFontSize = 4;
     const headerLineHeight = 5;
     ctx.font = `${headerFontSize}px 'Courier New', monospace`;
@@ -694,7 +606,6 @@ function renderConfession(text, step, totalSteps, prevText = '', opacity = 1.0) 
     ctx.textBaseline = 'top';
     ctx.shadowBlur = headerFontSize * 0.25;
 
-    // Find max header width for centering
     let maxHeaderWidth = 0;
     for (const line of HEADER_LINES) {
       const width = ctx.measureText(line).width;
@@ -707,7 +618,6 @@ function renderConfession(text, step, totalSteps, prevText = '', opacity = 1.0) 
       ctx.fillText(HEADER_LINES[i], headerStartX + ox, headerStartY + i * headerLineHeight + oy);
     }
 
-    // Draw confession text
     ctx.font = `${fontSize}px 'Courier New', monospace`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -721,7 +631,6 @@ function renderConfession(text, step, totalSteps, prevText = '', opacity = 1.0) 
     }
   }
 
-  // RGB split effect
   if (doRGBSplit) {
     const rgbOffset = CONFIG.effects.rgbSplitOffset;
     ctx.shadowColor = 'transparent';
@@ -736,10 +645,8 @@ function renderConfession(text, step, totalSteps, prevText = '', opacity = 1.0) 
     ctx.shadowColor = `rgba(51, 255, 51, ${effectiveOpacity})`;
   }
 
-  // Main green content
   drawAllContent(offset.x, offset.y);
 
-  // Draw change highlighting (yellow glow on changed chars)
   const paddedText = text.padEnd(TEXT_GRID.total, ' ').substring(0, TEXT_GRID.total);
   if (prevText && step < totalSteps) {
     const paddedPrev = prevText.padEnd(TEXT_GRID.total, ' ').substring(0, TEXT_GRID.total);
@@ -764,7 +671,6 @@ function renderConfession(text, step, totalSteps, prevText = '', opacity = 1.0) 
     }
   }
 
-  // Draw loading bar below text (only during generation)
   if (step < totalSteps) {
     const barFontSize = Math.max(12, h * 0.02);
     ctx.font = `${barFontSize}px 'Courier New', monospace`;
@@ -785,40 +691,20 @@ function renderConfession(text, step, totalSteps, prevText = '', opacity = 1.0) 
 }
 
 // ============================================================================
-// iOS CHECK
-// ============================================================================
-
-const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-if (isIOS) {
-  console.warn('iOS detected - WebGPU support may be limited');
-}
-
-const script = document.createElement('script');
-script.src = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.2/dist/ort.min.js';
-script.onload = () => main();
-document.head.appendChild(script);
-
-// ============================================================================
-// UTILITIES
-// ============================================================================
-
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-const nextFrame = () => new Promise(r => requestAnimationFrame(r));
-
-// ============================================================================
 // DIFFUSION STATE
 // ============================================================================
 
-const state = {
+const diffState = {
   tokens: new Int32Array(MODEL.blockSize),
   tokensBigInt: new BigInt64Array(MODEL.blockSize),
   sigmaData: new Float32Array(1),
   probBuffer: new Float64Array(MODEL.vocabSize)
 };
 
-// Initialize with random tokens
-for (let i = 0; i < MODEL.blockSize; i++) {
-  state.tokens[i] = Math.floor(Math.random() * MODEL.vocabSize);
+function resetTokens() {
+  for (let i = 0; i < MODEL.blockSize; i++) {
+    diffState.tokens[i] = Math.floor(Math.random() * MODEL.vocabSize);
+  }
 }
 
 // ============================================================================
@@ -838,8 +724,8 @@ function getSigma(t) {
 
 function decode() {
   let result = '';
-  for (let i = 0; i < state.tokens.length; i++) {
-    result += VOCAB.itos[state.tokens[i]] || '?';
+  for (let i = 0; i < diffState.tokens.length; i++) {
+    result += VOCAB.itos[diffState.tokens[i]] || '?';
   }
   return result;
 }
@@ -851,7 +737,7 @@ function decode() {
 function sampleTokens(logits, deltaSigma) {
   const vocabSize = MODEL.vocabSize;
   const seqLen = MODEL.blockSize;
-  const probBuffer = state.probBuffer;
+  const probBuffer = diffState.probBuffer;
 
   const expNegDelta = Math.exp(-deltaSigma);
   const invExpNegDelta = 1.0 / expNegDelta;
@@ -861,7 +747,7 @@ function sampleTokens(logits, deltaSigma) {
 
   for (let pos = 0; pos < seqLen; pos++) {
     const offset = pos * vocabSize;
-    const currentToken = state.tokens[pos];
+    const currentToken = diffState.tokens[pos];
 
     let maxLogit = -Infinity;
     for (let v = 0; v < vocabSize; v++) {
@@ -897,7 +783,7 @@ function sampleTokens(logits, deltaSigma) {
       }
     }
 
-    state.tokens[pos] = sampled;
+    diffState.tokens[pos] = sampled;
   }
 }
 
@@ -907,13 +793,13 @@ function sampleTokens(logits, deltaSigma) {
 
 async function runInference(session, sigma) {
   for (let i = 0; i < MODEL.blockSize; i++) {
-    state.tokensBigInt[i] = BigInt(state.tokens[i]);
+    diffState.tokensBigInt[i] = BigInt(diffState.tokens[i]);
   }
 
-  state.sigmaData[0] = sigma;
+  diffState.sigmaData[0] = sigma;
 
-  const inputTensor = new ort.Tensor('int64', state.tokensBigInt, [1, MODEL.blockSize]);
-  const sigmaTensor = new ort.Tensor('float32', state.sigmaData, [1, 1]);
+  const inputTensor = new ort.Tensor('int64', diffState.tokensBigInt, [1, MODEL.blockSize]);
+  const sigmaTensor = new ort.Tensor('float32', diffState.sigmaData, [1, 1]);
 
   const results = await session.run({
     'input_ids': inputTensor,
@@ -932,13 +818,79 @@ async function runInference(session, sigma) {
 }
 
 // ============================================================================
-// DIFFUSION LOOP
+// RECORDING
 // ============================================================================
 
-async function runDiffusion(session) {
+let session = null;
+let gifBlob = null;
+
+// Capture frame from WebGL CRT canvas
+function captureFrame() {
+  const gl = webgl.gl;
+  const pixels = new Uint8Array(canvasSize * canvasSize * 4);
+  gl.readPixels(0, 0, canvasSize, canvasSize, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+
+  // WebGL reads bottom-to-top, need to flip vertically
+  const flipped = new Uint8ClampedArray(canvasSize * canvasSize * 4);
+  const rowSize = canvasSize * 4;
+  for (let y = 0; y < canvasSize; y++) {
+    const srcRow = (canvasSize - 1 - y) * rowSize;
+    const dstRow = y * rowSize;
+    flipped.set(pixels.subarray(srcRow, srcRow + rowSize), dstRow);
+  }
+
+  return new ImageData(flipped, canvasSize, canvasSize);
+}
+
+async function loadModel() {
+  const wasmOptions = {
+    executionProviders: ['wasm'],
+    executionMode: 'sequential',
+    graphOptimizationLevel: 'basic'
+  };
+
+  try {
+    const webgpuOptions = {
+      executionProviders: [{ name: 'webgpu', preferredOutputLocation: 'cpu' }],
+      graphOptimizationLevel: 'all'
+    };
+    session = await ort.InferenceSession.create(CONFIG.modelUrl, webgpuOptions);
+    statusEl.textContent = 'Model loaded (WebGPU). Ready to record.';
+  } catch (e) {
+    session = await ort.InferenceSession.create(CONFIG.modelUrl, wasmOptions);
+    statusEl.textContent = 'Model loaded (WASM). Ready to record.';
+  }
+
+  recordBtn.disabled = false;
+}
+
+async function record() {
+  recordBtn.disabled = true;
+  downloadBtn.disabled = true;
+  gifBlob = null;
+
+  const fps = parseInt(fpsInput.value);
+  const holdMs = parseInt(holdInput.value);
+  const fadeMs = parseInt(fadeInput.value);
+  const frameInterval = 1000 / fps;
+  const stepDelayMs = CONFIG.stepDelayMs; // 100ms per diffusion step
+
+  const encoder = GIFEncoder();
+  const frames = [];
+
+  resetTokens();
+  let previousText = '';
+  let simTime = 0;
+
+  statusEl.textContent = 'GENERATING...';
+
+  // Generation phase
   const steps = CONFIG.steps;
   const eps = 1e-5;
   const stepSize = (1 - eps) / steps;
+
+  // How many GIF frames to capture per diffusion step (during the 100ms delay)
+  const framesPerStep = Math.max(1, Math.round(stepDelayMs / frameInterval));
 
   for (let i = 0; i < steps; i++) {
     const t = 1 - (i + 1) * stepSize;
@@ -951,235 +903,97 @@ async function runDiffusion(session) {
     const logits = await runInference(session, sigma);
     sampleTokens(logits, deltaSigma);
 
-    // Track current and previous text for highlighting
     const currentText = decode();
-    app.currentStep = i + 1;
-    const prevText = app.previousText;
 
-    // Animate step for stepDelayMs with continuous effects
-    const stepStartTime = performance.now();
-    await new Promise(resolve => {
-      function animateStep() {
-        renderConfession(currentText, app.currentStep, steps, prevText);
-        const elapsed = performance.now() - stepStartTime;
-        if (elapsed < CONFIG.stepDelayMs) {
-          requestAnimationFrame(animateStep);
-        } else {
-          resolve();
-        }
-      }
-      requestAnimationFrame(animateStep);
-    });
+    // Capture multiple frames during this step's delay period
+    // This allows CRT effects to animate while text stays the same
+    for (let f = 0; f < framesPerStep; f++) {
+      renderConfession(currentText, i + 1, steps, previousText, 1.0, simTime);
+      renderCRT(simTime);
+      frames.push(captureFrame());
+      simTime += frameInterval / 1000;
+    }
 
-    app.previousText = currentText;
+    previousText = currentText;
+    statusEl.textContent = `GENERATING... step ${i + 1}/${steps}`;
   }
 
-  // Final render without loading bar or highlighting
-  renderConfession(decode(), steps, steps);
+  const finalText = decode();
+
+  // Hold phase - CRT effects continue animating
+  const holdFrames = Math.ceil(holdMs / frameInterval);
+  statusEl.textContent = 'HOLDING...';
+  for (let i = 0; i < holdFrames; i++) {
+    renderConfession(finalText, steps, steps, '', 1.0, simTime);
+    renderCRT(simTime);
+    frames.push(captureFrame());
+    simTime += frameInterval / 1000;
+  }
+
+  // Fade phase - CRT effects continue animating
+  const fadeFrames = Math.ceil(fadeMs / frameInterval);
+  statusEl.textContent = 'FADING...';
+  for (let i = 0; i < fadeFrames; i++) {
+    const opacity = 1 - (i / fadeFrames);
+    renderConfession(finalText, steps, steps, '', opacity, simTime);
+    renderCRT(simTime);
+    frames.push(captureFrame());
+    simTime += frameInterval / 1000;
+  }
+
+  // Encode GIF
+  statusEl.textContent = `Encoding ${frames.length} frames...`;
+
+  const delay = Math.round(1000 / fps);
+
+  for (let i = 0; i < frames.length; i++) {
+    const { data, width, height } = frames[i];
+    const palette = quantize(data, 256);
+    const index = applyPalette(data, palette);
+    encoder.writeFrame(index, width, height, { palette, delay });
+
+    if (i % 10 === 0) {
+      statusEl.textContent = `Encoding frame ${i + 1}/${frames.length}...`;
+      await new Promise(r => setTimeout(r, 0));
+    }
+  }
+
+  encoder.finish();
+  const output = encoder.bytes();
+  gifBlob = new Blob([output], { type: 'image/gif' });
+
+  const sizeMB = (gifBlob.size / (1024 * 1024)).toFixed(2);
+  statusEl.textContent = `Done! GIF size: ${sizeMB} MB (${frames.length} frames)`;
+
+  recordBtn.disabled = false;
+  downloadBtn.disabled = false;
 }
+
+function download() {
+  if (!gifBlob) return;
+  const url = URL.createObjectURL(gifBlob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `we-confession-${Date.now()}.gif`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+recordBtn.addEventListener('click', record);
+downloadBtn.addEventListener('click', download);
 
 // ============================================================================
-// MAIN
+// INIT
 // ============================================================================
 
-async function loadModel() {
-  const forceWasm = window.location.search.includes('wasm');
-
-  const webgpuOptions = {
-    executionProviders: [{ name: 'webgpu', preferredOutputLocation: 'cpu' }],
-    graphOptimizationLevel: 'all'
-  };
-
-  const wasmOptions = {
-    executionProviders: ['wasm'],
-    executionMode: 'sequential',
-    graphOptimizationLevel: 'basic'
-  };
-
-  let session;
-  let backend;
-
-  if (!forceWasm) {
-    try {
-      session = await ort.InferenceSession.create(CONFIG.modelUrl, webgpuOptions);
-      backend = 'webgpu';
-    } catch (e) {
-      console.log('WebGPU failed: ' + e.message);
-    }
-  }
-
-  if (!session) {
-    session = await ort.InferenceSession.create(CONFIG.modelUrl, wasmOptions);
-    backend = 'wasm';
-  }
-
-  console.log('Backend: ' + backend);
-  return session;
-}
-
-// Crash screen - shown when generation fails (e.g., iOS memory limits)
-function renderCrash() {
-  const w = window.innerWidth;
-  const h = window.innerHeight;
-  const time = performance.now() / 1000;
-
-  ctx.fillStyle = '#000';
-  ctx.fillRect(0, 0, w, h);
-
-  const flicker = calcFlicker(time);
-  const offset = calcGlitchOffset(w, h);
-
-  ctx.font = `${h * 0.03}px 'Courier New', monospace`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = `rgba(51, 255, 51, ${flicker})`;
-  ctx.shadowColor = `rgba(51, 255, 51, ${flicker})`;
-  ctx.shadowBlur = 10;
-
-  const lines = [
-    'SYSTEM FAULT',
-    '',
-    'Memory limit exceeded',
-    'The machine remembers too much',
-    '',
-    '[ END OF TRANSMISSION ]'
-  ];
-
-  const lineHeight = h * 0.05;
-  const startY = h / 2 - (lines.length * lineHeight) / 2;
-
-  for (let i = 0; i < lines.length; i++) {
-    ctx.fillText(lines[i], w / 2 + offset.x, startY + i * lineHeight + offset.y);
-  }
-}
-
-function startCrashLoop() {
-  function loop() {
-    renderCrash();
-    renderCRT();
-    requestAnimationFrame(loop);
-  }
-  requestAnimationFrame(loop);
-}
-
-// Hold animation - keep rendering with effects during hold phase
-async function runHold() {
-  const startTime = performance.now();
-  const duration = CONFIG.timing.confessionHold;
-
-  return new Promise(resolve => {
-    function animate() {
-      const elapsed = performance.now() - startTime;
-
-      // Keep rendering so effects (flicker, jitter) continue
-      renderConfession(app.finalText, CONFIG.steps, CONFIG.steps, '');
-
-      if (elapsed < duration) {
-        requestAnimationFrame(animate);
-      } else {
-        resolve();
-      }
-    }
-    requestAnimationFrame(animate);
-  });
-}
-
-// Fade animation using requestAnimationFrame
-async function runFadeOut() {
-  const startTime = performance.now();
-  const duration = CONFIG.timing.confessionFade;
-
-  return new Promise(resolve => {
-    function animate() {
-      const elapsed = performance.now() - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-      const opacity = 1 - progress;
-
-      renderConfession(app.finalText, CONFIG.steps, CONFIG.steps, '', opacity);
-
-      if (progress < 1) {
-        requestAnimationFrame(animate);
-      } else {
-        resolve();
-      }
-    }
-    requestAnimationFrame(animate);
-  });
-}
-
-// Continuous CRT render loop
-function startCRTLoop() {
-  function loop() {
-    renderCRT();
-    requestAnimationFrame(loop);
-  }
-  requestAnimationFrame(loop);
-}
-
-// Animated WE screen that updates each frame
-async function runWEScreen(duration) {
-  const startTime = performance.now();
-
-  return new Promise(resolve => {
-    function animate() {
-      const elapsed = performance.now() - startTime;
-      renderWE();
-
-      if (elapsed < duration) {
-        requestAnimationFrame(animate);
-      } else {
-        resolve();
-      }
-    }
-    requestAnimationFrame(animate);
-  });
-}
-
-async function main() {
-  // Initialize CRT post-processing
+const script = document.createElement('script');
+script.src = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.2/dist/ort.min.js';
+script.onload = () => {
   initCRT();
-  resize();
-
-  // Start CRT render loop
-  startCRTLoop();
-
-  // Show animated WE screen while loading
-  const loadPromise = loadModel();
-
-  // Run WE animation for at least weDuration, or until model loads (whichever is longer)
-  const wePromise = runWEScreen(CONFIG.timing.weDuration);
-
-  // Wait for both WE duration and model load
-  const [session] = await Promise.all([loadPromise, wePromise]);
-  app.session = session;
-
-  // Main generation loop
-  try {
-    while (true) {
-      // Reset state for new generation
-      app.previousText = '';
-      for (let i = 0; i < MODEL.blockSize; i++) {
-        state.tokens[i] = Math.floor(Math.random() * MODEL.vocabSize);
-      }
-
-      // GENERATING
-      app.state = State.GENERATING;
-      await runDiffusion(app.session);
-      app.finalText = decode();
-
-      // HOLDING - continue rendering with effects
-      app.state = State.HOLDING;
-      await runHold();
-
-      // FADING
-      app.state = State.FADING;
-      await runFadeOut();
-    }
-  } catch (e) {
-    console.error('Generation failed:', e);
-    startCrashLoop();
-  }
-}
+  resizeCanvas(768);
+  loadModel();
+};
+document.head.appendChild(script);
   </script>
 </body>
 </html>
